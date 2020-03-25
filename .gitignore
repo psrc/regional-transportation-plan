@@ -1,0 +1,8 @@
+/Data
+/inputs
+/output
+/shapefiles
+/pictures
+/__pycache__
+*.xlsx
+*.csv
