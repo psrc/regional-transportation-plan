@@ -28,7 +28,7 @@ shinyUI(
                   bsButton("showpanel", "Show/hide sidebar", type = "toggle", value = TRUE),
             navbarPage(title = "", theme = "styles.css", windowTitle = "PSRC Community Profiles",
                              tabPanel(icon("city"),
-                                      h1("Mobility 2050 by Community"),
+                                      h1("Mobility 2050"),
                                       "We invite you to explore various model oututs for Mobility 2050 through our data portal. This data portal provides access to projects and performance results by jurisdiction. If you can't find what you're looking for, or would like further information, please contact us and we will be happy to assist you.",
                                       hr(),
                                       h2(textOutput("general_heading")),

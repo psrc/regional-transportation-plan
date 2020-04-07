@@ -2,7 +2,7 @@
 shinyServer(function(input, output) {
 
     output$general_heading <- renderText({
-        paste(input$Place, " in the Regional Transportation Plan.")
+        paste(input$Place, "")
     })
 
     output$summary_stat_heading <- renderText({
@@ -50,19 +50,19 @@ shinyServer(function(input, output) {
     })
                             
     output$Population <- renderText({
-        paste("Population: ",  format(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population", min_year,0), nsmall = 0, big.mark = ","), "/", format(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population", max_year,0), nsmall = 0, big.mark = ","))
+        paste("Population: ",  format(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population", 2014,0), nsmall = 0, big.mark = ","), "/", format(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population", 2050,0), nsmall = 0, big.mark = ","))
     })
 
     output$Households <- renderText({
-        paste("Households: ",  format(return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households", min_year,0), nsmall = 0, big.mark = ","), "/", format(return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households",  max_year,0), nsmall = 0, big.mark = ","))
+        paste("Households: ",  format(return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households", 2014,0), nsmall = 0, big.mark = ","), "/", format(return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households",  2050,0), nsmall = 0, big.mark = ","))
     })
     
     output$Jobs <- renderText({
-        paste("Jobs: ",  format(return_estimate(model.outputs,input$Place,"total","all", "", "total-jobs", "Total-Jobs", min_year,0), nsmall = 0, big.mark = ","), "/", format(return_estimate(model.outputs,input$Place,"total","all", "", "total-jobs", "Total-Jobs",  max_year,0), nsmall = 0, big.mark = ","))
+        paste("Jobs: ",  format(return_estimate(model.outputs,input$Place,"total","all", "", "total-jobs", "Total-Jobs",2014,0), nsmall = 0, big.mark = ","), "/", format(return_estimate(model.outputs,input$Place,"total","all", "", "total-jobs", "Total-Jobs",  2050,0), nsmall = 0, big.mark = ","))
     })
 
     output$HHSize <- renderText({
-        paste("Household Size: ", round(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population", min_year,0)/return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households", min_year,0), 2), "/", round(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population",  max_year,0)/return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households",  max_year,0), 2))
+        paste("Household Size: ", round(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population", 2014,0)/return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households",2014,0), 2), "/", round(return_estimate(model.outputs,input$Place,"total","all", "", "total-population", "Total-Population",  2050,0)/return_estimate(model.outputs,input$Place,"total","all", "", "total-households", "Total-Households",  2050,0), 2))
     })    
     
     output$ModelBackground <- renderText({

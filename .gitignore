@@ -5,4 +5,5 @@
 /pictures
 /__pycache__
 *.xlsx
+*.xls
 *.csv

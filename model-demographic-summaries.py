@@ -7,29 +7,34 @@ pd.set_option('chained_assignment',None)
 
 analysis_years = ['2014','2025','2040','2050']
 
-low_low = 25000
-low = 50000
-med_low = 75000
-med = 100000
-med_high = 150000
-high_low = 200000
-high = 250000
+i1 = 25000
+i2 = 50000
+i3 = 75000
+i4 = 100000
+i5 = 150000
+i6 = 200000
 
-size_categories = ['1 person','2 people','3 people','4 people','5 or more','Total-Households']
-type_categories = ['Single-family','Multi-family','Condo','Mobile-home','Total-Households']
-ownership_categories = ['Own','Rent','Total-Households']
-income_categories = ['less than $25k','$25k to $50k','$50k to $75k','$75k to $100k','$100k to $150k','$150k to $200k','$200k to $250k','more than $250k','Total-Households']
-gender_categories = ['Male','Female','Total-Population']
-age_categories = ['0-17','18-64','65-84','85+','Total-Population']
-worker_categories = ['Full-Time-Worker','Part-Time-Worker','Not-a-Worker','Total-Population']
-student_categories = ['Full-Time-Student','Part-Time-Student','Not-a-Student','Total-Population']
-job_categories = ['Education','Food-Service','Government','Industrial','Medical','Office','Retail','Resource','Service','Others','Total-Jobs']
+hhsize_descriptions = ['1 person','2 people','3 people','4 people','5 or more','Total-Households']
+hhtype_descriptions = ['Single-Family','Multi-Family','Mobile-Home','Total-Households']
+hhownership_descriptions = ['Own','Rent','Total-Households']
+hhincome_descriptions = ['less than $25k','$25k to $50k','$50k to $75k','$75k to $100k','$100k to $150k','$150k to $200k','more than $200k','Median Income', 'Total-Households']
+gender_descriptions = ['Male','Female','Total-Population']
+age_descriptions = ['0-17','18-64','65-84','85+','Median Age','Total-Population']
+worker_descriptions = ['Worker','Not-a-Worker','Total-Population']
+student_descriptions = ['Student','Not-a-Student','Total-Population']
+job_descriptions = ['Construction','Manufacturing','WTU','Retail','Services','Government','Education','Total-Jobs']
 
-working_path = os.getcwd()
+working_directory = os.getcwd()
+input_directory = os.path.join(working_directory,'inputs')
+output_directory = os.path.join(working_directory,'output')
+
+# Create the output directory for the trip generation results
+if not os.path.exists(output_directory):
+    os.makedirs(output_directory)
 
 # Parcel Columns to use and what to rename them
 original_parcel_columns = ['PARCELID','XCOORD_P','YCOORD_P','EMPEDU_P','EMPFOO_P','EMPGOV_P','EMPIND_P','EMPMED_P','EMPOFC_P','EMPRET_P','EMPRSC_P','EMPSVC_P','EMPOTH_P','EMPTOT_P']
-updated_parcel_columns = ['parcel_id','xcoord','ycoord','Education','Food-Service','Government','Industrial','Medical','Office','Retail','Resource','Service','Others','Total-Jobs']
+final_parcel_columns = ['parcel_id','xcoord','ycoord','Construction','Manufacturing','WTU','Retail','Services','Government','Education','Total-Jobs']
 
 # Lists for HH and Person Files
 hh_variables=['hhno','hhsize','hhparcel','hhincome','hownrent','hrestype']
@@ -58,39 +63,44 @@ def summarize_demographic_data(current_df, working_geo, working_pl_type, working
     working_cols = [working_geo]
 
     for current_descr in working_var_descr:
-        working_cols.append('total_'+ working_var_name + '_' + current_descr)
+        working_cols.append(working_var_name + '_' + current_descr)
         
     current_df.columns = working_cols
     
     print('Grouping all parcel results by ' + working_geo + ' for year ' + str(current_year))
     place_results =current_df.groupby([working_geo]).sum().reset_index()
-           
-    print('Calculating share of total for ' + working_var_name)
-    for current_descr in working_var_descr: 
-        place_results['share_'+ working_var_name + '_' + current_descr] = place_results['total_'+ working_var_name + '_' + current_descr] / place_results['total_'+ working_var_name + '_' + working_total]
-   
-    place_results = place_results.fillna(0)
-    
-    if (working_var_name == "total-jobs" or working_var_name == "total-population" or working_var_name == "total-households"):
-        place_results = place_results.drop(['share_'+ working_var_name + '_' + working_total], axis = 1)
-    else:
-        place_results = place_results.drop(['total_'+ working_var_name + '_' + working_total, 'share_'+ working_var_name + '_' + working_total], axis = 1)    
-        
-    
-
+                   
     print('Converting from wide to long and creating final columns for ' + working_geo + ' for year ' + str(current_year))
     final_places = pd.melt(place_results, id_vars=[working_geo])
     final_places['place_type'] = working_pl_type
     final_places['year'] = working_year
-    final_places[['variable_category','variable_name','variable_description']] = final_places.variable.str.split("_",expand=True,)
+    final_places['data_source'] = 'UrbanSim'
+    final_places[['variable_name','variable_description']] = final_places.variable.str.split("_",expand=True,)
     final_places = final_places.drop(['variable'], axis = 1)
     final_places  = final_places.rename(columns={'value':'estimate'})
     final_places  = final_places.rename(columns={working_geo:'geog_name'})
+
+    print('Calculating shares of total for each place')
+    final_places['temp'] = 0
+    for ind in final_places.index: 
+        current_name = final_places['geog_name'][ind]
+        total_estimate = final_places[(final_places['geog_name'] == current_name) & (final_places['variable_description'] == working_total)]['estimate'].values[0]
+        final_places['temp'][ind] = total_estimate
+            
+    final_places['share'] = final_places['estimate'] / final_places['temp']
+    final_places = final_places.drop(['temp'], axis = 1)
+    
+    if 'total' in working_var_name:
+        print('Total results are being kept')
+    else:
+        final_places = final_places[~final_places['variable_description'].str.contains('Total')]
+     
+    final_places.loc[final_places['variable_description'].str.contains('Median'), 'estimate'] = final_places['share']
     
     return(final_places)
 
 print('Loading parcels with overlays from disk')
-parcel_overlay_file = os.path.join(working_path,'inputs','shapefiles','wgs1984','parcels_with_overlays.csv')
+parcel_overlay_file = os.path.join(input_directory,'shapefiles','wgs1984','parcels_with_overlays.csv')
 all_parcels = pd.read_csv(parcel_overlay_file, low_memory=False)  
    
 # Cleanup of a few geograhpy names
@@ -104,8 +114,8 @@ final_summary = pd.DataFrame()
 
 for current_year in analysis_years:
 
-    hh_person = os.path.join(working_path,'inputs',current_year,'hh_and_persons.h5')
-    parcel_file = os.path.join(working_path,'inputs',current_year,'parcels_urbansim.txt')
+    hh_person = os.path.join(input_directory,current_year,'hh_and_persons.h5')
+    parcel_file = os.path.join(input_directory,current_year,'parcels_urbansim.txt')
      
     #############################################################################################
     #############################################################################################
@@ -117,7 +127,22 @@ for current_year in analysis_years:
     parcels = pd.read_csv(parcel_file, sep = ' ')
     parcels.columns = parcels.columns.str.upper()
     parcels = parcels.loc[:,original_parcel_columns]
-    parcels.columns = updated_parcel_columns
+    
+    print('Adjusting Job Sectors  to match Published Job Sectors')
+    parcels['Construction'] = parcels['EMPRSC_P'] + parcels['EMPIND_P'] * 0.28
+    parcels['Manufacturing'] = parcels['EMPIND_P'] * 0.38
+    parcels['WTU'] = parcels['EMPIND_P'] * 0.34
+    parcels['Retail'] = parcels['EMPRET_P']
+    parcels['Services'] = (parcels['EMPEDU_P'] * 0.2196) + parcels['EMPFOO_P'] + parcels['EMPMED_P'] + parcels['EMPOFC_P'] + parcels['EMPSVC_P'] + parcels['EMPOTH_P']
+    parcels['Government'] = parcels['EMPGOV_P']
+    parcels['Education'] = parcels['EMPEDU_P'] * 0.7804
+    parcels['Total-Jobs'] = parcels['EMPTOT_P']
+    
+    print('Renaming a few columns and trimming parcels to final columns')
+    parcels  = parcels.rename(columns={'PARCELID':'parcel_id'})
+    parcels  = parcels.rename(columns={'XCOORD_P':'xcoord'})
+    parcels  = parcels.rename(columns={'YCOORD_P':'ycoord'})
+    parcels = parcels[final_parcel_columns]
 
     print('Opening HH and Person H5 file and creating dataframes from them for year ' + str(current_year))
     hh_people = h5py.File(hh_person,'r+')
@@ -137,16 +162,15 @@ for current_year in analysis_years:
     households['$75k to $100k'] = 0
     households['$100k to $150k'] = 0
     households['$150k to $200k'] = 0
-    households['$200k to $250k'] = 0
-    households['more than $250k'] = 0
-    households.loc[households['hhincome'] <= low_low, 'less than $25k'] = 1 
-    households.loc[(households['hhincome'] > low_low) & (households['hhincome'] <= low), '$25k to $50k'] = 1 
-    households.loc[(households['hhincome'] > low) & (households['hhincome'] <= med_low), '$50k to $75k'] = 1 
-    households.loc[(households['hhincome'] > med_low) & (households['hhincome'] <= med), '$75k to $100k'] = 1 
-    households.loc[(households['hhincome'] > med) & (households['hhincome'] <= med_high), '$100k to $150k'] = 1 
-    households.loc[(households['hhincome'] > med_high) & (households['hhincome'] <= high_low), '$150k to $200k'] = 1 
-    households.loc[(households['hhincome'] > high_low) & (households['hhincome'] <= high), '$200k to $250k'] = 1 
-    households.loc[households['hhincome'] > high, 'more than $250k'] = 1 
+    households['more than $200k'] = 0
+    households['Median Income'] = households['hhincome']
+    households.loc[households['hhincome'] <= i1, 'less than $25k'] = 1 
+    households.loc[(households['hhincome'] > i1) & (households['hhincome'] <= i2), '$25k to $50k'] = 1 
+    households.loc[(households['hhincome'] > i2) & (households['hhincome'] <= i3), '$50k to $75k'] = 1 
+    households.loc[(households['hhincome'] > i3) & (households['hhincome'] <= i4), '$75k to $100k'] = 1 
+    households.loc[(households['hhincome'] > i4) & (households['hhincome'] <= i5), '$100k to $150k'] = 1 
+    households.loc[(households['hhincome'] > i5) & (households['hhincome'] <= i6), '$150k to $200k'] = 1  
+    households.loc[households['hhincome'] > i6, 'more than $200k'] = 1 
 
     print('Adding Household Size Category for year ' + str(current_year))
     households['1 person'] = 0
@@ -161,14 +185,12 @@ for current_year in analysis_years:
     households.loc[households['hhsize'] >= 5, '5 or more'] = 1 
 
     print('Adding Household Type for year ' + str(current_year)) 
-    households['Single-family'] = 0
-    households['Multi-family'] = 0
-    households['Condo'] = 0
-    households['Mobile-home'] = 0
-    households.loc[households['hrestype'] == 1, 'Single-family'] = 1 
-    households.loc[(households['hrestype'] == 2), 'Multi-family'] = 1 
-    households.loc[(households['hrestype'] == 3) | (households['hrestype'] == 0), 'Condo'] = 1 
-    households.loc[(households['hrestype'] == 4), 'Mobile-home'] = 1 
+    households['Single-Family'] = 0
+    households['Multi-Family'] = 0
+    households['Mobile-Home'] = 0
+    households.loc[households['hrestype'] == 1, 'Single-Family'] = 1 
+    households.loc[(households['hrestype'] == 2) | (households['hrestype'] == 3) | (households['hrestype'] == 0), 'Multi-Family'] = 1 
+    households.loc[(households['hrestype'] == 4), 'Mobile-Home'] = 1 
 
     print('Adding ownership Type for year ' + str(current_year))
     households['Own'] = 0
@@ -197,26 +219,23 @@ for current_year in analysis_years:
     person_df['18-64'] = 0
     person_df['65-84'] = 0
     person_df['85+'] = 0
+    person_df['Median Age'] = person_df['pagey']
     person_df.loc[person_df['pagey'] < 18, '0-17'] = 1 
     person_df.loc[(person_df['pagey'] >= 18) & (person_df['pagey'] < 65), '18-64'] = 1 
     person_df.loc[(person_df['pagey'] >= 65) & (person_df['pagey'] < 85), '65-84'] = 1 
     person_df.loc[person_df['pagey'] >= 85, '85+'] = 1 
 
     print('Adding Worker Status for year ' + str(current_year))
-    person_df['Full-Time-Worker'] = 0
-    person_df['Part-Time-Worker'] = 0
+    person_df['Worker'] = 0
     person_df['Not-a-Worker'] = 0
     person_df.loc[person_df['pwtyp'] == 0, 'Not-a-Worker'] = 1 
-    person_df.loc[person_df['pwtyp'] == 1, 'Full-Time-Worker'] = 1 
-    person_df.loc[person_df['pwtyp'] == 2, 'Part-Time-Worker'] = 1 
+    person_df.loc[(person_df['pwtyp'] == 1) | (person_df['pwtyp'] == 2) , 'Worker'] = 1 
 
     print('Adding Student Status for year ' + str(current_year)) 
-    person_df['Full-Time-Student'] = 0
-    person_df['Part-Time-Student'] = 0
+    person_df['Student'] = 0
     person_df['Not-a-Student'] = 0
     person_df.loc[person_df['pstyp'] == 0, 'Not-a-Student'] = 1 
-    person_df.loc[person_df['pstyp'] == 1, 'Full-Time-Student'] = 1 
-    person_df.loc[person_df['pstyp'] == 2, 'Part-Time-Student'] = 1 
+    person_df.loc[(person_df['pstyp'] == 1) | (person_df['pstyp'] == 2), 'Student'] = 1 
 
     person_df['Total-Population'] = 1
 
@@ -247,21 +266,21 @@ for current_year in analysis_years:
     #############################################################################################
     #############################################################################################
     
-    demographic_summaries = [['household-size', size_categories, 'Total-Households'],
-                             ['household-type', type_categories,'Total-Households'],
-                             ['household-ownership', ownership_categories, 'Total-Households'],
-                             ['household-income', income_categories, 'Total-Households'],
-                             ['gender', gender_categories, 'Total-Population'],
-                             ['age', age_categories, 'Total-Population'],
-                             ['worker', worker_categories, 'Total-Population'],
-                             ['student', student_categories, 'Total-Population'],
-                             ['jobs', job_categories, 'Total-Jobs'],
+    demographic_summaries = [['household-size', hhsize_descriptions, 'Total-Households'],
+                             ['household-type', hhtype_descriptions,'Total-Households'],
+                             ['household-ownership', hhownership_descriptions, 'Total-Households'],
+                             ['household-income', hhincome_descriptions, 'Total-Households'],
+                             ['gender', gender_descriptions, 'Total-Population'],
+                             ['age', age_descriptions, 'Total-Population'],
+                             ['worker', worker_descriptions, 'Total-Population'],
+                             ['student', student_descriptions, 'Total-Population'],
+                             ['jobs', job_descriptions, 'Total-Jobs'],
                              ['total-households',['Total-Households'],'Total-Households'],
                              ['total-population',['Total-Population'],'Total-Population'],
                              ['total-jobs',['Total-Jobs'],'Total-Jobs']
                              ]
     
-    geographic_types = [['place_name', 'pl'],['county_nm','co'],['tract_id','tr'],['region_name', 're']]
+    geographic_types = [['place_name', 'pl'],['county_nm','co']]
       
     for summaries in  demographic_summaries:
         print('Working on ' + summaries[0] + ' for the year ' + str(current_year))
@@ -276,10 +295,8 @@ for current_year in analysis_years:
             else:
                 final_summary = final_summary.append(current_summary, sort=False)
 
-final_summary['variable_mode'] = ""
-final_summary['variable_hhtype'] = "all"    
 
 print('Writing final trip summary dataframe to csv for further analysis')
-final_summary.to_csv('demographic_model_output_summary_data_all_years.csv',index=False)
+final_summary.to_csv(os.path.join(output_directory,'demographic_model_data_for_rtp.csv'),index=False)
 
 print('All done.')
