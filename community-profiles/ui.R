@@ -7,14 +7,19 @@ shinyUI(
             br(),
             selectInput("Place","Please select the community you are interested in:",data_places),
             radioButtons("estimate_choice", label = "Estimate Type:",
-                         choices = list("Share" = "share", "Total" = "total"), 
+                         choices = list("Share" = "share", "Total" = "estimate"), 
                          selected = "share"),
             hr(),
             strong(textOutput("summary_stat_heading")),
             textOutput("Population"),
             textOutput("Households"),
-            textOutput("Jobs"),
             textOutput("HHSize"),
+            textOutput("Jobs"),
+            textOutput("MedianAge"),
+            textOutput("MedianIncome"),
+            textOutput("AvgTT"),
+            textOutput("DriveAlone"),
+            textOutput("Transit"),
             hr(),
             strong("Note on Model Data:"),
             textOutput("ModelBackground"),
@@ -43,10 +48,10 @@ shinyUI(
                                     tabPanel("Age",
                                              fluidRow(br(),column(width = 6, h2(textOutput("age_heading"))),
                                                       column(width = 3 , selectInput("Age_Year","Year:",data_years,selected = max(data_years))),
-                                                      column(width = 3, selectInput("Age_Var","Age Group:",age))),
+                                                      column(width = 3, selectInput("Age_Var","Age Group:",age_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_age")),
-                                                 column(width = 6, leafletOutput("map_age"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -57,10 +62,10 @@ shinyUI(
                                     tabPanel("Gender",
                                              fluidRow(br(),column(width = 6, h2(textOutput("gender_heading"))),
                                                         column(width = 3, selectInput("Gender_Year","Year:",data_years,selected = max(data_years))),
-                                                        column(width = 3, selectInput("Gender_Var","Gender:",gender))),
+                                                        column(width = 3, selectInput("Gender_Var","Gender:",gender_var_descr))),
                                              fluidRow(
-                                                 column(width = 6, plotlyOutput("chart_gender")),
-                                                 column(width = 6, leafletOutput("map_gender"))
+                                                 column(width = 6, plotOutput("chart_gender")),
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -71,10 +76,10 @@ shinyUI(
                                     tabPanel("Work Status",
                                              fluidRow(br(),column(width = 6, h2(textOutput("worker_heading"))),
                                                       column(width = 3, selectInput("Worker_Year","Year:",data_years,selected = max(data_years))),
-                                                      column(width = 3 , selectInput("Worker_Var","Work Status:",worker))),
+                                                      column(width = 3 , selectInput("Worker_Var","Work Status:",worker_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_worker")),
-                                                 column(width = 6, leafletOutput("map_worker"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -85,10 +90,10 @@ shinyUI(
                                     tabPanel("Student Status",
                                              fluidRow(br(),column(width = 6, h2(textOutput("student_heading"))),
                                                 column(width = 3, selectInput("Student_Year","Year:",data_years,selected = max(data_years))),
-                                                column(width = 3 , selectInput("Student_Var","Student Status:",student))),
+                                                column(width = 3 , selectInput("Student_Var","Student Status:",student_var_descr))),
                                              fluidRow(
                                                 column(width = 6, plotlyOutput("chart_student")),
-                                                column(width = 6, leafletOutput("map_student"))
+                                                column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -105,10 +110,10 @@ shinyUI(
                                     tabPanel("Type",
                                              fluidRow(br(),column(width = 6,  h2(textOutput("hhtype_heading"))),
                                                 column(width = 3, selectInput("HHType_Year","Year:",data_years,selected = max(data_years))),
-                                                column(width = 3 , selectInput("HHType_Var","Household Type:",hhtype))),
+                                                column(width = 3 , selectInput("HHType_Var","Household Type:",hhtype_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_hhtype")),
-                                                 column(width = 6, leafletOutput("map_hhtype"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -119,10 +124,10 @@ shinyUI(
                                     tabPanel("Size",
                                              fluidRow(br(),column(width = 6, h2(textOutput("hhsize_heading"))),
                                                 column(width = 3, selectInput("HHSize_Year","Year:",data_years,selected = max(data_years))),
-                                                column(width = 3 , selectInput("HHSize_Var","Household Size:",hhsize))),
+                                                column(width = 3 , selectInput("HHSize_Var","Household Size:",hhsize_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_hhsize")),
-                                                 column(width = 6, leafletOutput("map_hhsize"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -133,10 +138,10 @@ shinyUI(
                                     tabPanel("Ownership",
                                              fluidRow(br(),column(width = 6, h2(textOutput("hhownership_heading"))), 
                                                 column(width = 3, selectInput("HHOwn_Year","Year:",data_years,selected = max(data_years))),
-                                                column(width = 3 , selectInput("HHOwn_Var","Ownership:",hhownership))),
+                                                column(width = 3 , selectInput("HHOwn_Var","Ownership:",hhownership_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_hhownership")),
-                                                 column(width = 6, leafletOutput("map_hhownership"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -147,10 +152,10 @@ shinyUI(
                                     tabPanel("Income",
                                              fluidRow(br(),column(width = 6, h2(textOutput("hhincome_heading"))), 
                                                 column(width = 3, selectInput("HHIncome_Year","Year:",data_years,selected = max(data_years))),
-                                                column(width = 3 , selectInput("HHIncome_Var","Household Income:",hhincome))),
+                                                column(width = 3 , selectInput("HHIncome_Var","Household Income:",hhincome_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_hhincome")),
-                                                 column(width = 6, leafletOutput("map_hhincome"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -167,10 +172,10 @@ shinyUI(
                                          tabPanel("Occupation",
                                                   fluidRow(br(),column(width = 6, h2(textOutput("occupation_heading"))), 
                                                     column(width = 3, selectInput("Job_Year","Year:",data_years,selected = max(data_years))),
-                                                    column(width = 3 , selectInput("Job_Var","Occupation:",jobs))),
+                                                    column(width = 3 , selectInput("Job_Var","Occupation:",jobs_var_descr))),
                                                   fluidRow(
                                                     column(width = 6, plotlyOutput("chart_occupation")),
-                                                    column(width = 6, leafletOutput("map_occupation"))
+                                                    column(width = 6, "map coming soon!")
                                                       
                                                   ), # end of fluid row
                                                   fluidRow(
@@ -187,10 +192,10 @@ shinyUI(
                                     tabPanel("Mode to Work",
                                              fluidRow(br(),column(width = 6, h2(textOutput("work_mode_heading"))),
                                                       column(width = 3, selectInput("Mode_Year","Year:",data_years,selected = max(data_years))),
-                                                      column(width = 3 , selectInput("Mode_Var","Mode:",modes))),
+                                                      column(width = 3 , selectInput("Mode_Var","Mode:",modes_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_mode_to_work")),
-                                                 column(width = 6, leafletOutput("map_mode_to_work"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(
@@ -199,12 +204,12 @@ shinyUI(
                                     ), # end of mode to work tab panel
 
                                 tabPanel("Travel Time to Work",
-                                             fluidRow(br(),column(width = 4, selectInput("TT_Mode","Mode:",modes)),
+                                             fluidRow(br(),column(width = 4, selectInput("TT_Mode","Mode:",traveltime_modes)),
                                                       column(width = 4, selectInput("TT_Year","Year:",data_years,selected = max(data_years))),
-                                                      column(width = 4 , selectInput("TT_Var","Travel Time:",traveltime))),
+                                                      column(width = 4 , selectInput("TT_Var","Travel Time:",traveltime_var_descr))),
                                              fluidRow(
                                                  column(width = 6, plotlyOutput("chart_work_traveltime")),
-                                                 column(width = 6, leafletOutput("map_work_traveltime"))
+                                                 column(width = 6, "map coming soon!")
                                                  
                                              ), # end of fluid row
                                              fluidRow(

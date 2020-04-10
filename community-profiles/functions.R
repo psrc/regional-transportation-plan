@@ -4,17 +4,24 @@
 ##################################################################################
 ##################################################################################
 
-return_estimate <- function(w_tbl, w_plc, w_cat, w_hhtype, w_mode, w_name, w_desc, w_yr, w_dec) {
-  w_result <- as.numeric(w_tbl[geog_name %in% w_plc & variable_category %in% w_cat & variable_description %in% w_desc & variable_name %in% w_name & variable_mode %in% w_mode & variable_hhtype %in% w_hhtype & year %in% w_yr, sum(estimate)])
+return_estimate <- function(w_tbl, w_plc, w_name, w_desc, w_yr, w_source) {
+  w_result <- as.numeric(w_tbl[geog_name %in% w_plc & variable_description %in% w_desc & variable_name %in% w_name & year %in% w_yr & data_source %in% w_source, sum(estimate)])
   return(w_result)
 }
 
-create_summary_table <- function(w_tbl, w_plc, w_cat, w_hhtype, w_mode, w_name, w_desc, w_cols, w_ord, w_len, f_name) {
+return_share <- function(w_tbl, w_plc, w_name, w_desc, w_yr, w_source) {
+  w_result <- as.numeric(w_tbl[geog_name %in% w_plc & variable_description %in% w_desc & variable_name %in% w_name & year %in% w_yr & data_source %in% w_source, sum(share)])
+  return(w_result)
+}
+
+create_summary_table <- function(w_tbl, w_plc, w_name, w_desc, w_cols, w_ord, w_len, f_name, estimate_type, base_year) {
   
   # Subset the table and rename columns
-  tbl <- w_tbl[geog_name %in% w_plc & variable_category %in% w_cat & variable_description %in% w_desc & variable_name %in% w_name & variable_mode %in% w_mode & variable_hhtype %in% w_hhtype]
+  w_yrs <- c(base_year,2025,2040,2050)
+  tbl <- w_tbl[geog_name %in% w_plc & variable_description %in% w_desc & variable_name %in% w_name & year %in% w_yrs]
+  w_cols <- c(w_cols,estimate_type)
   tbl <- tbl[,..w_cols]
-  n_nms <- c(f_name,"Estimate","Year")
+  n_nms <- c(f_name,"Year","Source",estimate_type)
   setnames(tbl,n_nms)
   
   # Set the order of the table using factors
@@ -22,87 +29,136 @@ create_summary_table <- function(w_tbl, w_plc, w_cat, w_hhtype, w_mode, w_name, 
   tbl <- tbl[order(get(f_name)),]
   
   # Convert to long format for table display
-  wide_tbl <- dcast(tbl, get(f_name) ~ Year, value.var="Estimate")
-  setnames(wide_tbl,c(f_name,data_years))
+  wide_tbl <- dcast(tbl, get(f_name) ~ Source + Year, value.var= estimate_type)
+  setnames(wide_tbl,c(f_name,'Observed',w_yrs))
+  
+  data_cols <- c('Observed',w_yrs)
   
   # Add a total row
   dfTotals <- data.frame(f_name="Total",t(colSums(wide_tbl[,-1])))
   colnames(dfTotals) <- names(wide_tbl)
   wide_tbl <- rbind(wide_tbl, dfTotals)
   
-  if (w_cat %in% c("share")) {
+  if (estimate_type %in% c("share")) {
     
-    c_tbl <- datatable(wide_tbl,rownames = FALSE, options = list(pageLength = w_len, columnDefs = list(list(className = 'dt-center', targets =1:4))))  %>% formatPercentage(data_years, 0)
+    c_tbl <- datatable(wide_tbl,rownames = FALSE, options = list(pageLength = w_len, columnDefs = list(list(className = 'dt-center', targets =1:5))))  %>% formatPercentage(data_cols, 0)
     
   } else {
     
-    c_tbl <- datatable(wide_tbl,rownames = FALSE, options = list(pageLength = w_len, columnDefs = list(list(className = 'dt-center', targets =1:4))))  %>% formatCurrency(data_years, "", digits = 0)
+    c_tbl <- datatable(wide_tbl,rownames = FALSE, options = list(pageLength = w_len, columnDefs = list(list(className = 'dt-center', targets =1:5))))  %>% formatCurrency(data_cols, "", digits = 0)
     
   }  
   return(c_tbl)
   
 }
 
-create_stacked_bar <- function(w_tbl, w_plc, w_cat, w_hhtype, w_mode, w_name, w_desc, w_cols, w_ord, w_len, f_name, w_title) {
+create_bar_chart <- function(w_tbl, w_plc, w_name, w_desc, w_cols, w_ord, f_name, estimate_type, base_year, w_title, bar_type) {
   
   # Subset the table and rename columns
-  tbl <- w_tbl[geog_name %in% w_plc & variable_category %in% w_cat & variable_description %in% w_desc & variable_name %in% w_name & variable_mode %in% w_mode & variable_hhtype %in% w_hhtype]
+  w_yrs <- c(base_year,2025,2040,2050)
+  tbl <- w_tbl[geog_name %in% w_plc & variable_description %in% w_desc & variable_name %in% w_name & year %in% w_yrs]
+  w_cols <- c(w_cols,estimate_type)
   tbl <- tbl[,..w_cols]
-  n_nms <- c(f_name,"Estimate","Year")
+  n_nms <- c(f_name,"Year","Source",estimate_type)
   setnames(tbl,n_nms)
   
   # Set the order of the table using factors
   tbl[[f_name]] <- factor(tbl[[f_name]], levels = w_ord)
   tbl <- tbl[order(get(f_name)),]
   
-  if (w_cat %in% c("share")) {
+  # Rename the Base Year Observed Column
+  tbl$Year <- as.character(tbl$Year)
+  tbl[tbl$Source %in% c("acs/acs5","lehd/lodes"), "Year"] <- "Observed"
+  tbl$Year <- factor(tbl$Year, levels = c("Observed",as.character(base_year),"2025","2040","2050"))
+  tbl <- tbl[order(Year),]
+  
+  plot_labels <- c("Observed","2014","2025","2040","2050")
+  
+  if (estimate_type %in% c("share")) {
     
-    w_chart <- ggplotly(ggplot(data=tbl,
-                               aes(x=`Year`,
-                                   y=`Estimate`,
-                                   fill = get(f_name),
-                                   text = paste0("<b>",get(f_name)," share of total ",w_title,": ","</b>",prettyNum(round(`Estimate`*100, 1), big.mark = ","),"%")
-                               )) +
-                          geom_bar(position="stack", stat="identity", width = 5) +
-                          scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
-                          scale_x_continuous(breaks = tbl$Year, labels = tbl$Year) +
-                          xlab("Year") +
+    w_chart <- ggplotly(ggplot(data=tbl, aes(fill=get(f_name), y=`share`, x=`Year`,text = paste0("<b>",get(f_name)," share of total ",w_title,": ","</b>",prettyNum(round(`share`*100, 1), big.mark = ","),"%"))) + 
+                          geom_bar(position=bar_type, stat="identity") +
+                          scale_fill_manual(values= psrc_colors) +
+                          scale_y_continuous(labels = scales::percent, limits = c(0, 1))+
+                          scale_x_discrete(labels = plot_labels) +
                           ylab(paste0("Percent of Total ",w_title)) +
                           theme(legend.title = element_blank(),
                                 axis.text=element_text(size=10),
                                 axis.text.x.bottom=element_text(size=10),
-                                axis.title=element_text(size=10,face="bold"),
+                                axis.title.y =element_text(size=10,face="bold"),
+                                axis.title.x = element_blank(),
+                                panel.grid.major = element_blank(),
+                                panel.grid.minor = element_blank(),
+                                panel.border = element_blank(),
+                                axis.line = element_blank())
+                        ,tooltip = c("text"))                        
+    
+  } else {
+    
+    w_chart <- ggplotly(ggplot(data=tbl, aes(fill=get(f_name), y=`estimate`, x=`Year`,text = paste0("<b>","Total ", get(f_name)," ",w_title,": ","</b>",prettyNum(round(`estimate`, -1), big.mark = ",")))) + 
+                          geom_bar(position=bar_type, stat="identity") +
+                          scale_fill_manual(values= psrc_colors) +
+                          scale_y_continuous(labels = scales::comma)+
+                          scale_x_discrete(labels = plot_labels) +
+                          ylab(paste0("Total ",w_title))+
+                          theme(legend.title = element_blank(),
+                                axis.text=element_text(size=10),
+                                axis.text.x.bottom=element_text(size=10),
+                                axis.title.y =element_text(size=10,face="bold"),
+                                axis.title.x = element_blank(),
                                 panel.grid.major = element_blank(),
                                 panel.grid.minor = element_blank(),
                                 panel.border = element_blank(),
                                 axis.line = element_blank())
                         ,tooltip = c("text"))
     
-  } else {
-    
-    w_chart <- ggplotly(ggplot(data=tbl,
-                               aes(x=`Year`,
-                                   y=`Estimate`,
-                                   fill = get(f_name),
-                                   text = paste0("<b>","Total ", get(f_name)," ",w_title,": ","</b>",prettyNum(round(`Estimate`, -1), big.mark = ","))
-                               )) +
-                          geom_bar(position="stack", stat="identity", width = 5) +
-                          scale_y_continuous(labels = scales::comma)+
-                          scale_x_continuous(breaks = tbl$Year, labels = tbl$Year) +
-                          xlab("Year") +
-                          ylab(paste0("Total ",w_title)) +
-                          theme(legend.title = element_blank(),
-                                axis.text=element_text(size=10),
-                                axis.text.x.bottom=element_text(size=10),
-                                axis.title = element_text(size=10,face="bold"),
-                                panel.grid.major = element_blank(),
-                                panel.grid.minor = element_blank(),
-                                panel.border = element_blank(),
-                                axis.line = element_blank())
-                        ,tooltip = c("text"))    
   }
   
   return(w_chart)
+  
+}
+
+create_pie_chart <- function(w_tbl, w_plc, w_name, w_desc, w_cols, w_ord, f_name, estimate_type, base_year, w_title) {
+  
+  # Subset the table and rename columns
+  w_yrs <- c(base_year,2025,2040,2050)
+  tbl <- w_tbl[geog_name %in% w_plc & variable_description %in% w_desc & variable_name %in% w_name & year %in% w_yrs]
+  w_cols <- c(w_cols,"estimate","share")
+  tbl <- tbl[,..w_cols]
+  n_nms <- c(f_name,"Year","Source","estimate","share")
+  setnames(tbl,n_nms)
+  
+  # Set the order of the table using factors
+  tbl[[f_name]] <- factor(tbl[[f_name]], levels = w_ord)
+  tbl <- tbl[order(get(f_name)),]
+  
+  # Rename the Base Year Observed Column
+  tbl$Year <- as.character(tbl$Year)
+  tbl[tbl$Source %in% c("acs/acs5","lehd/lodes"), "Year"] <- "Observed"
+  tbl$Year <- factor(tbl$Year, levels = c("Observed",as.character(base_year),"2025","2040","2050"))
+  tbl <- tbl[order(Year),]
+  
+  if (estimate_type %in% c("share")) {
+    wrk_pie <- ggplot(tbl, aes(x = "", y = `share`, fill = get(f_name))) +
+      geom_bar(width = 1, stat = "identity", color = "white") +
+      coord_polar("y", start = 0) +
+      geom_text(aes(label = paste0(round(`share`*100), "%")), color = "white", position = position_stack(vjust = 0.5))+
+      scale_fill_manual(values = psrc_colors) +
+      theme_void()+
+      theme(legend.position = "bottom", legend.direction = "horizontal", legend.title = element_blank())
+  } else {
+      wrk_pie <- ggplot(tbl, aes(x = "", y = `share`, fill = get(f_name))) +
+        geom_bar(width = 1, stat = "identity", color = "white") +
+        coord_polar("y", start = 0) +
+        geom_text(aes(label = `estimate`), color = "white", position = position_stack(vjust = 0.5))+
+        scale_fill_manual(values = psrc_colors) +
+        theme_void()+
+        theme(legend.position = "bottom", legend.direction = "horizontal", legend.title = element_blank())    
+  }
+  
+  wrk_pie <- wrk_pie + facet_wrap(vars(`Year`), ncol = 3)
+  
+  return(wrk_pie)
   
 }
 

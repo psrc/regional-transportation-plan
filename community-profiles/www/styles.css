@@ -45,6 +45,32 @@ h3 {
   color: #91268F;
 }
 
+#MedianAge {
+  font-size: 14pt;
+  color: #91268F;
+}
+
+#MedianIncome {
+  font-size: 14pt;
+  color: #91268F;
+}
+
+#AvgTT {
+  font-size: 14pt;
+  color: #91268F;
+}
+
+#DriveAlone {
+  font-size: 14pt;
+  color: #91268F;
+}
+
+
+#Transit {
+  font-size: 14pt;
+  color: #91268F;
+}
+
 #ModelBackground {
   font-size: 14pt;
 }
