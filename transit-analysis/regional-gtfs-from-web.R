@@ -74,6 +74,8 @@ region.trips <- NULL
 region.calendar <- NULL
 region.stop.times <- NULL
 
+gtfs <- gtfs.urls[['st']]
+
 for (gtfs in gtfs.urls) {
   
   print(paste0('Working on ', gtfs[[2]]))
@@ -390,8 +392,24 @@ for (gtfs in gtfs.urls) {
       
     }
     
-    current.stop.times <- bind_rows(current.stop.times, full.trips.by.frequency)  
-    rm(current.freq, end.time, full.trips.by.frequency, i, s, t, temp, trips.by.frequency)  
+    current.stop.times <- bind_rows(current.stop.times, full.trips.by.frequency)
+    
+    # Remove the original trips listed in stop times
+    current.stop.times <- current.stop.times %>%
+      filter(!(trip_id %in% unique.trips))
+    
+    # Generate New Tips to Include in Trips File
+    freq.trips <- full.trips.by.frequency %>%
+      filter(stop_sequence==1) %>%
+      select(trip_id, route_id, direction_id, shape_id, agency)
+    
+    current.trips <- bind_rows(current.trips, freq.trips)
+    
+    # Remove the original trips listed in trips
+    current.trips <- current.trips %>%
+      filter(!(trip_id %in% unique.trips))
+    
+    rm(current.freq, end.time, full.trips.by.frequency, i, s, t, temp, trips.by.frequency, freq.trips)  
     
   } # end of stop frequency if statement
 
