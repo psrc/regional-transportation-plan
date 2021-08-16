@@ -38,6 +38,8 @@ frequent.hourly.trip.threshold <- 8
 express.span.threshold <- 8
 equity.stop.threshold <- 0.5
 
+output.csv <- 'yes'
+
 # Database Connection and Queries -----------------------------------------
 server_name <- "AWS-PROD-SQL\\SOCKEYE"
 database_name <- "Elmer"
@@ -134,6 +136,7 @@ temp <- temp %>%
 
 region.trips <- left_join(region.trips, temp, by=c("trip_id"))
 
+# Determine Route Tiems from first and last stop in sttop time by trip
 trip.run.time <- region.stop.times %>%
   select(trip_id,stop_sequence) %>%
   group_by(trip_id) %>%
@@ -149,7 +152,7 @@ trip.end.time <- region.stop.times %>%
 
 trip.run.time <- left_join(trip.run.time, trip.start.time, by=c("trip_id","first_stop"))
 trip.run.time <- left_join(trip.run.time, trip.end.time, by=c("trip_id","last_stop"))
-trip.run.time <- trip.run.time %>% mutate(running_time=period_to_seconds(end_time - start_time)/3600) %>% drop_na() %>% select(trip_id,running_time)
+trip.run.time <- trip.run.time %>% mutate(running_time=period_to_seconds(seconds(end_time) - seconds(start_time))/3600) %>% drop_na() %>% select(trip_id,running_time)
 
 region.trips <- left_join(region.trips, trip.run.time, by=c("trip_id"))
 
@@ -197,12 +200,11 @@ region.routes <- left_join(region.routes, temp, by=c("route_id")) %>%
   drop_na() %>%
   mutate(daily_hours = average_trip_time*trips)
 
-
 # Define Service Typology -------------------------------------------------
 temp <- region.stop.times %>% 
   select(-trip_id) %>% 
   filter(stop_sequence==1) %>% 
-  mutate(trip_hour=arrival_time@hour) %>%
+  mutate(trip_hour=hour(arrival_time)) %>%
   select(route_id, trip_hour) %>%
   mutate(trip=1) %>%
   group_by(route_id, trip_hour) %>%
@@ -227,3 +229,8 @@ region.routes <- left_join(region.routes, temp, by=c("route_id")) %>%
     route_type==4 ~ "Ferry"))
 
 rm(temp)
+
+if (output.csv=='yes') {
+  fwrite(region.routes, "output/route_summary.csv")
+}
+
