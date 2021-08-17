@@ -62,10 +62,10 @@ tracts <- st_read("https://services6.arcgis.com/GWxg6t7KXELn1thE/arcgis/rest/ser
 
 # Load Regional GTFS Files ------------------------------------------------
 
-region.stops <- as_tibble(fread("output/region_stops.csv"))
-region.routes <- as_tibble(fread("output/region_routes.csv"))
-region.trips <- as_tibble(fread("output/region_trips.csv"))
-region.stop.times <- as_tibble(fread("output/region_stoptimes.csv"))
+stops <- as_tibble(fread("output/region_stops.csv"))
+routes <- as_tibble(fread("output/region_routes.csv"))
+trips <- as_tibble(fread("output/region_trips.csv"))
+stop.times <- as_tibble(fread("output/region_stoptimes.csv"))
 
 # Calculate Population Areas for Equity Analysis  --------------------------------------
 db_con <- dbConnect(odbc::odbc(),
@@ -94,18 +94,18 @@ tracts <- left_join(tracts, tract.youth, by=c("geoid"))
 rm(tract.disability, tract.elderly, tract.limited.english, tract.poverty, tract.people.of.color, tract.youth)
 
 # Join stops with tracts
-stops.layer = st_as_sf(region.stops, coords = c("stop_lon", "stop_lat"), crs = wgs84) %>% st_transform(spn) 
+stops.layer = st_as_sf(stops, coords = c("stop_lon", "stop_lat"), crs = wgs84) %>% st_transform(spn) 
 temp <- st_intersection(stops.layer, tracts) %>% st_drop_geometry() %>% select(-geoid,-county, -agency, -stop_name)
-region.stops <- left_join(region.stops, temp, by=c("stop_id")) %>% mutate(across(everything(), ~replace_na(.x, 0)))
+stops <- left_join(stops, temp, by=c("stop_id")) %>% mutate(across(everything(), ~replace_na(.x, 0)))
 
 rm(stops.layer, temp)
 
 # Join stops to Stop Times
-temp <- region.stops %>% select(-agency,-stop_name,-stop_lat,-stop_lon)
-region.stop.times <- left_join(region.stop.times, temp, by=c("stop_id"))
+temp <- stops %>% select(-agency,-stop_name,-stop_lat,-stop_lon)
+stop.times <- left_join(stop.times, temp, by=c("stop_id"))
 
 # Basic Trip Statistics ---------------------------------------------------
-temp <- region.stop.times %>% select(trip_id, arrival_time, disabled, elderly, limited_english, poverty, people_of_color, youth) %>% mutate(stop=1)
+temp <- stop.times %>% select(trip_id, arrival_time, disabled, elderly, limited_english, poverty, people_of_color, youth) %>% mutate(stop=1)
 
 temp <- temp %>%
   group_by(trip_id) %>%
@@ -134,19 +134,19 @@ temp <- temp %>%
     youth_stops>=equity.stop.threshold ~ 1,
     youth_stops<equity.stop.threshold ~ 0))
 
-region.trips <- left_join(region.trips, temp, by=c("trip_id"))
+trips <- left_join(trips, temp, by=c("trip_id"))
 
 # Determine Route Tiems from first and last stop in sttop time by trip
-trip.run.time <- region.stop.times %>%
+trip.run.time <- stop.times %>%
   select(trip_id,stop_sequence) %>%
   group_by(trip_id) %>%
   summarize(first_stop = min(stop_sequence), last_stop = max(stop_sequence)) 
 
-trip.start.time <- region.stop.times %>%
+trip.start.time <- stop.times %>%
   select(trip_id,stop_sequence,arrival_time) %>%
   rename(first_stop=stop_sequence, start_time=arrival_time)
 
-trip.end.time <- region.stop.times %>%
+trip.end.time <- stop.times %>%
   select(trip_id,stop_sequence,arrival_time) %>%
   rename(last_stop=stop_sequence, end_time=arrival_time)
 
@@ -154,12 +154,12 @@ trip.run.time <- left_join(trip.run.time, trip.start.time, by=c("trip_id","first
 trip.run.time <- left_join(trip.run.time, trip.end.time, by=c("trip_id","last_stop"))
 trip.run.time <- trip.run.time %>% mutate(running_time=period_to_seconds(seconds(end_time) - seconds(start_time))/3600) %>% drop_na() %>% select(trip_id,running_time)
 
-region.trips <- left_join(region.trips, trip.run.time, by=c("trip_id"))
+trips <- left_join(trips, trip.run.time, by=c("trip_id"))
 
 rm(temp, trip.run.time, trip.start.time, trip.end.time)
 
 # Basic Route Statistics --------------------------------------------------
-temp <- region.trips %>%
+temp <- trips %>%
   select(route_id, total_stops, disabled_stops, elderly_stops, limited_english_stops, poverty_stops, people_of_color_stops, youth_stops) %>%
   mutate(total_trips=1) %>%
   group_by(route_id) %>%
@@ -188,20 +188,20 @@ temp <- region.trips %>%
     youth>=equity.stop.threshold ~ 1,
     youth<equity.stop.threshold ~ 0))
 
-region.routes <- left_join(region.routes, temp, by=c("route_id"))
+routes <- left_join(routes, temp, by=c("route_id"))
 
-temp <- region.trips %>%
+temp <- trips %>%
   select(route_id, running_time) %>%
   drop_na() %>%
   group_by(route_id) %>%
   summarize(min_trip_time=round(min(running_time),2),max_trip_time=round(max(running_time),2), average_trip_time=round(mean(running_time),2))
 
-region.routes <- left_join(region.routes, temp, by=c("route_id")) %>%
+routes <- left_join(routes, temp, by=c("route_id")) %>%
   drop_na() %>%
   mutate(daily_hours = average_trip_time*trips)
 
 # Define Service Typology -------------------------------------------------
-temp <- region.stop.times %>% 
+temp <- stop.times %>% 
   select(-trip_id) %>% 
   filter(stop_sequence==1) %>% 
   mutate(trip_hour=hour(arrival_time)) %>%
@@ -221,16 +221,16 @@ temp <- region.stop.times %>%
     total_span>express.span.threshold & hourly_trips< frequent.hourly.trip.threshold ~ "Local")) %>%
   mutate(typology = replace_na(typology,"Local"))
   
-region.routes <- left_join(region.routes, temp, by=c("route_id")) %>% 
+routes <- left_join(routes, temp, by=c("route_id")) %>% 
   mutate(typology = case_when(
     route_type==0 ~ "Light Rail / Streetcar",
     route_type==2 ~ "Commuter Rail",
     route_type==3 ~ typology,
     route_type==4 ~ "Ferry"))
 
-rm(temp)
-
 if (output.csv=='yes') {
-  fwrite(region.routes, "output/route_summary.csv")
+  fwrite(routes, "output/route_summary.csv")
 }
 
+route.summary.tbl <- routes
+rm(temp, routes, stop.times,stops,trips,tracts,transit.type, db_con)

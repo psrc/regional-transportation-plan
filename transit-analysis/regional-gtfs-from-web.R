@@ -9,9 +9,6 @@ library(tibble)
 library(data.table)
 
 # Basic Inputs ------------------------------------------------------------
-service.period <- 'Fall' #enter either Fall or Spring
-transit.year <- 2018 # enter an year from 2015 to latest service period
-
 source("gtfs-urls.R")
 
 st.routes <- c("510","511","512","513","522","532","535","540","541","542","545",
@@ -32,9 +29,6 @@ transit.type <- c("Light Rail / Streetcar" = 0,
 
 transit.type <- enframe(transit.type) %>% rename(route_type=value, transit_mode=name)
 
-output.csv <- 'yes'
-output.elmer <- 'no'
-
 # Functions ---------------------------------------------------------------
 ConvertToSeconds <- function(X)
 {
@@ -51,12 +45,12 @@ if (service.period=="Fall") {
   transit.month = 3
 }
 
-month.dates <- seq(ymd(paste0(transit.year,"-",transit.month,"-01")),ymd(paste0(transit.year,"-",transit.month,"-28")),by="1 day")
-first.mon <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Mon" & day(month.dates) <= 7]
-first.tue <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Tue" & day(month.dates) <= 7]
-first.wed <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Wed" & day(month.dates) <= 7]
-first.thu <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Thu" & day(month.dates) <= 7]
-first.fri <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Fri" & day(month.dates) <= 7]
+month.dates <- seq(ymd(paste0(transit.year,"-",transit.month,"-15")),ymd(paste0(transit.year,"-",transit.month,"-28")),by="1 day")
+first.mon <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Mon" & day(month.dates) >= 17]
+first.tue <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Tue" & day(month.dates) >= 17]
+first.wed <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Wed" & day(month.dates) >= 17]
+first.thu <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Thu" & day(month.dates) >= 17]
+first.fri <- month.dates[lubridate::wday(month.dates,label = TRUE) == "Fri" & day(month.dates) >= 17]
 first.week <- c(first.mon, first.tue, first.wed, first.thu, first.fri)
 
 # WSF calendar is different and 2015 only has fall data so set date for WSF depending on the year
@@ -74,8 +68,6 @@ region.trips <- NULL
 region.calendar <- NULL
 region.stop.times <- NULL
 
-gtfs <- gtfs.urls[['st']]
-
 for (gtfs in gtfs.urls) {
   
   print(paste0('Working on ', gtfs[[2]]))
@@ -89,13 +81,38 @@ for (gtfs in gtfs.urls) {
   #########################################################################################################
   #########################################################################################################
   # Community Transit uses detailed calendar dates to identify weekday service
-  if(gtfs[[2]]=="CT"|gtfs[[2]]=="KCM") {
-    weekday.ids <- readr::read_csv(unz("working.zip","calendar_dates.txt"), show_col_types = FALSE) %>%
-      mutate(date=ymd(date)) %>%
-      filter(date%in%first.week & exception_type==1) %>% 
-      select(service_id) %>% 
-      pull() %>%
-      unique()
+  if(gtfs[[2]]=="CT") {
+    
+    if(transit.year >= 2018) {
+      weekday.ids <- readr::read_csv(unz("working.zip","calendar_dates.txt"), show_col_types = FALSE) %>%
+        mutate(date=ymd(date)) %>%
+        filter(date%in%first.week & exception_type==1) %>% 
+        select(service_id) %>% 
+        pull() %>%
+        unique()
+      
+    } else {
+      weekday.ids <- readr::read_csv(unz("working.zip","calendar.txt"), show_col_types = FALSE) %>%
+        filter((str_detect(service_id, "SEP-Weekday"))) %>%
+        select(service_id) %>%
+        pull()
+    }
+  }
+    
+  if(gtfs[[2]]=="KCM") {
+    
+    if(transit.year==2015) {
+      weekday.ids <- readr::read_csv(unz("working.zip","calendar.txt"), show_col_types = FALSE) %>%
+        filter((str_detect(service_id, "WEEKDAY")))
+    } else {
+    
+        weekday.ids <- readr::read_csv(unz("working.zip","calendar_dates.txt"), show_col_types = FALSE) %>%
+          mutate(date=ymd(date)) %>%
+          filter(date%in%first.week & exception_type==1) %>% 
+          select(service_id) %>% 
+          pull() %>%
+          unique()
+    }
   }
   
   if(gtfs[[2]]=="ET"|gtfs[[2]]=="PT"|gtfs[[2]]=="ST") {
@@ -241,7 +258,7 @@ for (gtfs in gtfs.urls) {
     
     mutate(shape_id = as.character(shape_id)) %>%
     
-    select(trip_id, route_id, direction_id, shape_id, agency)
+    select(trip_id, route_id, shape_id, agency)
 
   weekday.trips <- current.trips %>% select(trip_id) %>% pull
   
@@ -284,132 +301,145 @@ for (gtfs in gtfs.urls) {
   ### Weekday Stop Times from Frequencies
   #########################################################################################################
   #########################################################################################################
-  if(gtfs[[2]]=="ST") {
-    
+  zip.files <- unzip("working.zip", list = TRUE)$Name
+  
+  if ("frequencies.txt" %in% zip.files) {
+  
     current.freq <- readr::read_csv(unz("working.zip","frequencies.txt"), 
                                     col_types = list(start_time = col_character(),
-                                                     end_time = col_character())) %>%
-      filter(str_detect(trip_id,"WD")) %>%
-      mutate(agency=gtfs[[2]]) %>%
-      mutate(trip_id = paste0(agency,"_",trip_id)) %>%
-      
-      # Deal Start with times coded as past 24hrs for overnight transit
-      mutate(arr_secs = ConvertToSeconds(start_time)) %>%
-      
-      mutate(arr_time = case_when(
-        arr_secs >= 86400 ~ arr_secs-86400,
-        arr_secs < 86400 ~ arr_secs)) %>%
-      
-      mutate(arr_time = hms::as_hms(arr_time)) %>%
-      
-      mutate(arr_time = case_when(
-        arr_secs >= 86400 ~ paste0(transit.year,"-",transit.month,"-02 ",arr_time),
-        arr_secs < 86400 ~ paste0(transit.year,"-",transit.month,"-01 ",arr_time))) %>%
-      
-      mutate(start_time = as_datetime(arr_time)) %>%
-      
-      # Deal End with times coded as past 24hrs for overnight transit
-      mutate(e_secs = ConvertToSeconds(end_time)) %>%
-      
-      mutate(e_time = case_when(
-        e_secs >= 86400 ~ e_secs-86400,
-        e_secs < 86400 ~ e_secs)) %>%
-      
-      mutate(e_time = hms::as_hms(e_time)) %>%
-      
-      mutate(e_time = case_when(
-        e_secs >= 86400 ~ paste0(transit.year,"-",transit.month,"-02 ",e_time),
-        e_secs < 86400 ~ paste0(transit.year,"-",transit.month,"-01 ",e_time))) %>%
-      
-      mutate(end_time = as_datetime(e_time)) %>%
-      
-      select(-arr_secs, -arr_time, -e_secs, -e_time)
+                                                     end_time = col_character()))
     
-    unique.trips <- current.freq %>% select(trip_id) %>% pull() %>% unique()
+    freq.rows <- nrow(current.freq)
     
-    full.trips.by.frequency <- NULL
-    
-    for(trips in unique.trips) {
+    if(freq.rows >0) {
       
-      trips.by.frequency <- NULL
-      
-      t <- current.freq %>% filter(trip_id==trips)
-      s <- current.stop.times %>% filter(trip_id==trips)
-    
-      # Details of Trip Sequence
-      num.stops <- s %>% select(stop_sequence) %>% pull() %>% length()
-      starting.time <- seconds(s %>% filter(stop_sequence==1) %>% select(arrival_time) %>% pull())
-      ending.time <- seconds(s %>% filter(stop_sequence==num.stops) %>% select(arrival_time) %>% pull())
-      run.time <- period_to_seconds(ending.time - starting.time)
-      stop.to.stop <- run.time/(num.stops-1)
-      
-      for (row in 1:nrow(t)) {
-    
-        starting.time <- period_to_seconds(seconds(t[row, "start_time"] %>% pull()))
-        ending.time <- period_to_seconds(seconds(t[row, "end_time"] %>% pull()))
-        trip.interval <- t[row, "headway_secs"] %>% pull()
-        
-        i <- as_tibble(seq(from=starting.time, to=ending.time, by=trip.interval)) %>% mutate(trip_id=trips)
-        
-        ifelse(is.null(trips.by.frequency), trips.by.frequency <- i, trips.by.frequency <- bind_rows(trips.by.frequency,i))
+      if(gtfs[[2]]=="ST") {
+        current.freq <- current.freq %>% filter(str_detect(trip_id,"WD"))
       }
+    
+      current.freq <- current.freq %>%
+        mutate(agency=gtfs[[2]]) %>%
+        mutate(trip_id = paste0(agency,"_",trip_id)) %>%
       
-      trips.by.frequency <- trips.by.frequency %>% 
-        mutate(arrival_time=seconds_to_period(value)) %>%
-        mutate(stop_sequence=1) %>%
-        rowid_to_column() %>%
-        mutate(trip_id = paste0(trip_id,"_",rowid)) %>%
-        select(-rowid, -value)
+        # Deal Start with times coded as past 24hrs for overnight transit
+        mutate(arr_secs = ConvertToSeconds(start_time)) %>%
       
-      temp <- trips.by.frequency
+        mutate(arr_time = case_when(
+          arr_secs >= 86400 ~ arr_secs-86400,
+          arr_secs < 86400 ~ arr_secs)) %>%
       
-      for (stop.num in 2:num.stops) {
-        start.time <- period_to_seconds(seconds(temp %>% select(arrival_time) %>% pull()))
+        mutate(arr_time = hms::as_hms(arr_time)) %>%
+      
+        mutate(arr_time = case_when(
+          arr_secs >= 86400 ~ paste0(transit.year,"-",transit.month,"-02 ",arr_time),
+          arr_secs < 86400 ~ paste0(transit.year,"-",transit.month,"-01 ",arr_time))) %>%
+      
+        mutate(start_time = as_datetime(arr_time)) %>%
+      
+        # Deal End with times coded as past 24hrs for overnight transit
+        mutate(e_secs = ConvertToSeconds(end_time)) %>%
+      
+        mutate(e_time = case_when(
+          e_secs >= 86400 ~ e_secs-86400,
+          e_secs < 86400 ~ e_secs)) %>%
+      
+        mutate(e_time = hms::as_hms(e_time)) %>%
+      
+        mutate(e_time = case_when(
+          e_secs >= 86400 ~ paste0(transit.year,"-",transit.month,"-02 ",e_time),
+          e_secs < 86400 ~ paste0(transit.year,"-",transit.month,"-01 ",e_time))) %>%
+      
+        mutate(end_time = as_datetime(e_time)) %>%
+      
+        select(-arr_secs, -arr_time, -e_secs, -e_time)
+    
+      unique.trips <- current.freq %>% select(trip_id) %>% pull() %>% unique()
+    
+      full.trips.by.frequency <- NULL
+    
+      for(trips in unique.trips) {
+      
+        trips.by.frequency <- NULL
+      
+        t <- current.freq %>% filter(trip_id==trips)
+        s <- current.stop.times %>% filter(trip_id==trips)
+    
+        # Details of Trip Sequence
+        num.stops <- s %>% select(stop_sequence) %>% pull() %>% length()
+        starting.time <- seconds(s %>% filter(stop_sequence==1) %>% select(arrival_time) %>% pull())
+        ending.time <- seconds(s %>% filter(stop_sequence==num.stops) %>% select(arrival_time) %>% pull())
+        run.time <- period_to_seconds(ending.time - starting.time)
+        stop.to.stop <- run.time/(num.stops-1)
+      
+        for (row in 1:nrow(t)) {
+    
+          starting.time <- period_to_seconds(seconds(t[row, "start_time"] %>% pull()))
+          ending.time <- period_to_seconds(seconds(t[row, "end_time"] %>% pull()))
+          trip.interval <- t[row, "headway_secs"] %>% pull()
         
-        end.time <- as_tibble(start.time + (stop.to.stop*(stop.num-1))) %>% 
+          i <- as_tibble(seq(from=starting.time, to=ending.time, by=trip.interval)) %>% mutate(trip_id=trips)
+        
+          ifelse(is.null(trips.by.frequency), trips.by.frequency <- i, trips.by.frequency <- bind_rows(trips.by.frequency,i))
+        }
+      
+        trips.by.frequency <- trips.by.frequency %>% 
           mutate(arrival_time=seconds_to_period(value)) %>%
-          mutate(stop_sequence=stop.num) %>% 
-          mutate(trip_id=trips) %>%
+          mutate(stop_sequence=1) %>%
           rowid_to_column() %>%
           mutate(trip_id = paste0(trip_id,"_",rowid)) %>%
           select(-rowid, -value)
+      
+        temp <- trips.by.frequency
+      
+        for (stop.num in 2:num.stops) {
+          start.time <- period_to_seconds(seconds(temp %>% select(arrival_time) %>% pull()))
         
-        trips.by.frequency <- bind_rows(trips.by.frequency,end.time)
+          end.time <- as_tibble(start.time + (stop.to.stop*(stop.num-1))) %>% 
+            mutate(arrival_time=seconds_to_period(value)) %>%
+            mutate(stop_sequence=stop.num) %>% 
+            mutate(trip_id=trips) %>%
+            rowid_to_column() %>%
+            mutate(trip_id = paste0(trip_id,"_",rowid)) %>%
+            select(-rowid, -value)
         
+          trips.by.frequency <- bind_rows(trips.by.frequency,end.time)
+        
+        }
+      
+        # Add in other stop-time details
+        s <- s %>% select(-trip_id, -arrival_time)
+        r <- s %>% select(route_id) %>% pull() %>% unique()
+      
+        trips.by.frequency <- trips.by.frequency %>%
+          mutate(route_id = r)
+      
+        trips.by.frequency <- left_join(trips.by.frequency, s, by=c("route_id","stop_sequence"))
+        trips.by.frequency <- trips.by.frequency %>% mutate(arrival_time = as_datetime(arrival_time))
+      
+        ifelse(is.null(full.trips.by.frequency), full.trips.by.frequency <- trips.by.frequency, full.trips.by.frequency <- bind_rows(full.trips.by.frequency,trips.by.frequency))
+      
       }
-      
-      # Add in other stop-time details
-      s <- s %>% select(-trip_id, -arrival_time)
-      r <- s %>% select(route_id) %>% pull() %>% unique()
-      
-      trips.by.frequency <- trips.by.frequency %>%
-        mutate(route_id = r)
-      
-      trips.by.frequency <- left_join(trips.by.frequency, s, by=c("route_id","stop_sequence"))
-      trips.by.frequency <- trips.by.frequency %>% mutate(arrival_time = as_datetime(arrival_time))
-      
-      ifelse(is.null(full.trips.by.frequency), full.trips.by.frequency <- trips.by.frequency, full.trips.by.frequency <- bind_rows(full.trips.by.frequency,trips.by.frequency))
-      
-    }
     
-    current.stop.times <- bind_rows(current.stop.times, full.trips.by.frequency)
+      current.stop.times <- bind_rows(current.stop.times, full.trips.by.frequency)
     
-    # Remove the original trips listed in stop times
-    current.stop.times <- current.stop.times %>%
-      filter(!(trip_id %in% unique.trips))
+      # Remove the original trips listed in stop times
+      current.stop.times <- current.stop.times %>%
+        filter(!(trip_id %in% unique.trips))
     
-    # Generate New Tips to Include in Trips File
-    freq.trips <- full.trips.by.frequency %>%
-      filter(stop_sequence==1) %>%
-      select(trip_id, route_id, direction_id, shape_id, agency)
+      # Generate New Tips to Include in Trips File
+      freq.trips <- full.trips.by.frequency %>%
+        filter(stop_sequence==1) %>%
+        select(trip_id, route_id, shape_id, agency)
     
-    current.trips <- bind_rows(current.trips, freq.trips)
+      current.trips <- bind_rows(current.trips, freq.trips)
     
-    # Remove the original trips listed in trips
-    current.trips <- current.trips %>%
-      filter(!(trip_id %in% unique.trips))
+      # Remove the original trips listed in trips
+      current.trips <- current.trips %>%
+        filter(!(trip_id %in% unique.trips))
     
-    rm(current.freq, end.time, full.trips.by.frequency, i, s, t, temp, trips.by.frequency, freq.trips)  
+      rm(current.freq, end.time, full.trips.by.frequency, i, s, t, temp, trips.by.frequency, freq.trips)  
+    
+    } # end of check in the file length is greater than 0
     
   } # end of stop frequency if statement
 
@@ -435,9 +465,9 @@ region.routes <- region.routes %>% mutate(year=transit.year, service_change=serv
 region.trips <- region.trips %>% mutate(year=transit.year, service_change=service.period)
 region.stop.times <- region.stop.times %>% mutate(year=transit.year, service_change=service.period, arrival_time=as_datetime(arrival_time))
 
-if (output.csv=='yes') {
-  fwrite(region.stops, "output/region_stops.csv")
-  fwrite(region.routes, "output/region_routes.csv")
-  fwrite(region.trips, "output/region_trips.csv")
-  fwrite(region.stop.times, "output/region_stoptimes.csv")
+if (output.annual.csv=='yes') {
+  fwrite(region.stops, paste0("output/region_stops_",transit.year,".csv"))
+  fwrite(region.routes, paste0("output/region_routes_",transit.year,".csv"))
+  fwrite(region.trips, paste0("output/region_trips_",transit.year,".csv"))
+  fwrite(region.stop.times, paste0("output/region_stoptimes_",transit.year,".csv"))
 }
