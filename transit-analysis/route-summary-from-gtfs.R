@@ -14,10 +14,7 @@ library(DBI)
 library(data.table)
 
 # Basic Inputs ------------------------------------------------------------
-service.period <- 'Fall' #enter either Fall or Spring
-transit.year <- 2018 # enter an year from 2015 to latest service period
 
-# Census Year
 if (transit.year <= 2019) {
   census.year <- transit.year
 } else {
@@ -37,8 +34,6 @@ frequent.span.threshold <- 16
 frequent.hourly.trip.threshold <- 8
 express.span.threshold <- 8
 equity.stop.threshold <- 0.5
-
-output.csv <- 'yes'
 
 # Database Connection and Queries -----------------------------------------
 server_name <- "AWS-PROD-SQL\\SOCKEYE"
@@ -62,10 +57,16 @@ tracts <- st_read("https://services6.arcgis.com/GWxg6t7KXELn1thE/arcgis/rest/ser
 
 # Load Regional GTFS Files ------------------------------------------------
 
-stops <- as_tibble(fread("output/region_stops.csv"))
-routes <- as_tibble(fread("output/region_routes.csv"))
-trips <- as_tibble(fread("output/region_trips.csv"))
-stop.times <- as_tibble(fread("output/region_stoptimes.csv"))
+stops <- as_tibble(fread("output/region_stops_2015_to_2020.csv"))
+routes <- as_tibble(fread("output/region_routes_2015_to_2020.csv"))
+trips <- as_tibble(fread("output/region_trips_2015_to_2020.csv"))
+stop.times <- as_tibble(fread("output/region_stoptimes_2015_to_2020.csv"))
+
+# Filter the multi-year data to the transit year and service change
+stops <- stops %>% filter(year==transit.year & service_change==service.period)
+routes <- routes %>% filter(year==transit.year & service_change==service.period)
+trips <- trips %>% filter(year==transit.year & service_change==service.period)
+stop.times <- stop.times %>% filter(year==transit.year & service_change==service.period)
 
 # Calculate Population Areas for Equity Analysis  --------------------------------------
 db_con <- dbConnect(odbc::odbc(),
@@ -228,9 +229,8 @@ routes <- left_join(routes, temp, by=c("route_id")) %>%
     route_type==3 ~ typology,
     route_type==4 ~ "Ferry"))
 
-if (output.csv=='yes') {
-  fwrite(routes, "output/route_summary.csv")
+if (output.annual.csv=='yes') {
+  fwrite(routes, paste0("output/route_summary_",transit.year,".csv"))
 }
 
-route.summary.tbl <- routes
-rm(temp, routes, stop.times,stops,trips,tracts,transit.type, db_con)
+rm(temp,stop.times,stops,trips,tracts,transit.type,db_con)
