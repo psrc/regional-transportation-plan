@@ -67,6 +67,7 @@ region.routes <- NULL
 region.trips <- NULL
 region.calendar <- NULL
 region.stop.times <- NULL
+region.shapes <- NULL
 
 for (gtfs in gtfs.urls) {
   
@@ -442,6 +443,55 @@ for (gtfs in gtfs.urls) {
     } # end of check in the file length is greater than 0
     
   } # end of stop frequency if statement
+  
+  #########################################################################################################
+  #########################################################################################################
+  ### Shape Points
+  #########################################################################################################
+  #########################################################################################################
+  current.shapes <- readr::read_csv(unz("working.zip","shapes.txt"), show_col_types = FALSE)
+  temp <- readr::read_csv(unz("working.zip","trips.txt"), show_col_types = FALSE) %>% select(shape_id,route_id, service_id) %>% distinct()
+  current.shapes <- left_join(current.shapes,temp,by=c("shape_id"))
+  
+  current.shapes <- current.shapes %>%
+    filter(service_id %in% weekday.ids) %>%
+    mutate(agency=gtfs[[2]]) %>%
+    
+    # Clean Up Agency if it is a ST Route
+    mutate(temp = case_when(
+      route_id %in% st.routes ~ "ST",
+      !(route_id %in% st.routes) ~ agency)) %>%
+    mutate(agency=temp) %>%
+    select(-temp) %>%
+    
+    # Clean Up Agency if it is a Seattle Route
+    mutate(temp = case_when(
+      route_id %in% seattle.routes ~ "SEA",
+      !(route_id %in% seattle.routes) ~ agency)) %>%
+    mutate(agency=temp) %>%
+    select(-temp) %>%
+    
+    # Final Clean Up
+    mutate(route_id = paste0(agency,"_",route_id)) %>%
+    mutate(shape_id = paste0(agency,"_",shape_id)) %>%
+    mutate(agency=gtfs[[3]]) %>%
+    
+    # Clean Up Agency if it is a ST Route
+    mutate(temp = case_when(
+      route_id %in% paste0("ST_",st.routes) ~ "Sound Transit",
+      !(route_id %in% paste0("ST_",st.routes)) ~ agency)) %>%
+    mutate(agency=temp) %>%
+    select(-temp) %>%
+    
+    # Clean Up Agency if it is a Seattle Route
+    mutate(temp = case_when(
+      route_id %in% paste0("SEA_",seattle.routes) ~ "City of Seattle",
+      !(route_id %in% paste0("SEA_",seattle.routes)) ~ agency)) %>%
+    mutate(agency=temp) %>%
+    select(-temp) %>%
+    
+    mutate(shape_id = as.character(shape_id)) %>%
+    select(-service_id)
 
   #########################################################################################################
   #########################################################################################################
@@ -453,9 +503,10 @@ for (gtfs in gtfs.urls) {
   ifelse(is.null(region.routes), region.routes <- current.routes, region.routes <- bind_rows(region.routes, current.routes))
   ifelse(is.null(region.trips), region.trips <- current.trips, region.trips <- bind_rows(region.trips, current.trips))
   ifelse(is.null(region.stop.times), region.stop.times <- current.stop.times, region.stop.times <- bind_rows(region.stop.times, current.stop.times))
+  ifelse(is.null(region.shapes), region.shapes <- current.shapes, region.shapes <- bind_rows(region.shapes, current.shapes))
   
   file.remove("working.zip")
-  rm(current.routes,current.stop.times,current.stops,current.trips)
+  rm(current.routes,current.stop.times,current.stops,current.trips, current.shapes, temp)
 
 }
 
@@ -464,10 +515,12 @@ region.stops <- region.stops %>% mutate(year=transit.year, service_change=servic
 region.routes <- region.routes %>% mutate(year=transit.year, service_change=service.period)
 region.trips <- region.trips %>% mutate(year=transit.year, service_change=service.period)
 region.stop.times <- region.stop.times %>% mutate(year=transit.year, service_change=service.period, arrival_time=as_datetime(arrival_time))
+region.shapes <- region.shapes %>% mutate(year=transit.year, service_change=service.period)
 
 if (output.annual.csv=='yes') {
   fwrite(region.stops, paste0("output/region_stops_",transit.year,".csv"))
   fwrite(region.routes, paste0("output/region_routes_",transit.year,".csv"))
   fwrite(region.trips, paste0("output/region_trips_",transit.year,".csv"))
   fwrite(region.stop.times, paste0("output/region_stoptimes_",transit.year,".csv"))
+  fwrite(region.shapes, paste0("output/region_shapes_",transit.year,".csv"))
 }
