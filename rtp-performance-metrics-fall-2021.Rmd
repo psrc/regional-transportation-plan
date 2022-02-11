@@ -1,0 +1,294 @@
+---
+title: "Performance Metrics"
+author: "Transportation Policy Board"
+date: "September 9, 2021"
+output: 
+  powerpoint_presentation:
+    reference_doc: rtp-psrc-template.pptx
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(scales)
+library(plotly)
+library(rlang)
+library(knitr)
+
+source("high-level-summary.R")
+
+```
+
+## Overview
+
+Topics covered in today's presentation:
+
+- RTP Background 
+- Analysis Geographies
+- Truck Travel
+- Congestion
+- Mode of Transportation
+- Vehicle Miles Driven
+- Transit Boardings & Access
+- Next Steps
+
+# Background
+
+## We are a growing region
+
+![](images\\vision-2050-growth.png){width=50%}
+
+## Regional Transportation Plan
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- Builds from VISION 2050 
+- Objectives:
+  - Make progress on existing challenges, address current and future needs of the transportation system  
+    - Provide better data and analysis to support local investment planning (2024 comprehensive plans)  
+    
+  -Plan for long-term system investments to accommodate future growth  
+    -Improve existing system, big picture thinking on future investments (aviation, rail, ferries)  
+
+
+:::
+::: {.column}
+![](images\\vision-rtp.png){width=100%}
+:::
+::::::::::::::
+
+## Reminder:  Key Changes Since 2018
+
+- 2018 macro-economic forecast more aggressive 
+- By 2040, larger system to maintain and operate for additional decade to 2050
+- Updated project list and costs
+- Improved estimation methodologies, particularly for maintenance, preservation, and operations
+- 2040-2050 period: major ferry, transit vehicle, bridge replacement cycles
+- Plan horizon 6 years longer
+- \$2022 vs. \$2018
+
+## Regional Capacity Projects
+
+- 34 new or expanded High-Capacity Transit routes
+- 30 new or expanded regional trails
+- 56% of the plan focused on maintenance and preservation needs
+- Significant investment in multimodal, integrated transportation system
+- Local and regional transit investments represent 70% of all system improvements 
+
+
+# Analysis Geographies
+
+## Equity Components of Performance Measures
+
+Equity is a focus in the 2022-2050 Regional Transportation Plan. Since current models do not forecast many demographic characteristics, **equity geographies** were developed using Census data to identify areas with higher shares of different population groups. We have combined these geographies with other place based geographies to better understand the differences in travel behavior across the region. The levels of geography that will be analyzed in the RTP include:
+
+
+- County
+- Regional Growth Center
+- Regional Geography
+- 50% People of Color / above Regional Average People of Color
+- 50% People of Lower Income / above Regional Average People of Lower Income
+- Above Regional Average for People under age 18
+- Above Regional Average People aged 65+
+- Above Regional Average People with Limited English Proficiency
+- Above Regional Average People with a Disability
+  
+## Equity Geographies: Above Regional Average
+```{r equity_maps, echo=FALSE, fig.height=7, fig.width=15}
+equity_maps_figure 
+```
+
+# Truck Travel
+
+## In 2018, there were more than `r toString(format(round(by.truck.trips,-2), nsmall=0, big.mark=","))` truck trips per day. By 2050, this is forecast to increase `r paste0(round(truck.trips.ratio*100,0),"%")` to more than `r toString(format(round(cp.truck.trips,-2), nsmall=0, big.mark=","))` trips per day.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- Medium Trucks accounted for approximately `r paste0(round(by.med.truck.vmt.percent*100,1),"%")` of the total miles traveled in the region in 2018 and are forecast to be `r paste0(round(cp.med.truck.vmt.percent*100,1),"%")` in 2050.
+
+- Heavy Trucks accounted for approximately `r paste0(round(by.hvy.truck.vmt.percent*100,1),"%")` of the total miles traveled in the region in 2018 and are forecast to be `r paste0(round(cp.hvy.truck.vmt.percent*100,1),"%")` in 2050.
+
+:::
+::: {.column}
+```{r truck_vmt_region, echo=FALSE}
+truck.distance.chart
+```
+:::
+::::::::::::::
+
+## In 2018, the average heavy truck driver spent more than `r toString(format(round(by.hvy.truck.delay,0), nsmall=0, big.mark=","))` hours sitting in traffic each and every year. By the year 2050, that delay is forecast to increase to more than `r toString(format(round(cp.hvy.truck.delay,0), nsmall=0, big.mark=","))` hours.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- In 2018, trucks accounted for approximately `r paste0(round(by.truck.vhd.percent*100,0),"%")` of the total delay in the region.
+- By 2050, trucks are forecast to account for approximately `r paste0(round(cp.truck.vhd.percent*100,0),"%")` of the total delay in the region.
+
+:::
+::: {.column}
+```{r truck_delay_region, echo=FALSE}
+truck.delay.chart
+```
+:::
+::::::::::::::
+
+# Congestion 
+
+## In 2018, the average household sat in congestion for more than `r toString(format(round(by.delay.hh,0), nsmall=0, big.mark=","))` hours each year. By the year 2050, the average household is forecast sit in congestion `r toString(format(round(cp.delay.hh,0), nsmall=0, big.mark=","))` hours each year, a `r toString(round(cp.delay.ratio*100,0))`% reduction over the Base Year.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- In 2018, trucks accounted for approximately `r paste0(round(by.truck.vhd.percent*100,0),"%")` of the total delay in the region.
+- By 2050, trucks are forecast to account for approximately `r paste0(round(cp.truck.vhd.percent*100,0),"%")` of the total delay in the region.
+
+:::
+::: {.column}
+```{r vhd_county_chart, echo=FALSE}
+vhd.region.chart
+```
+:::
+::::::::::::::
+
+## Hours each Household spends in Congestion each year
+```{r vhd_geo_chart, echo=FALSE, fig.height=7, fig.width=15}
+vhd.geo.chart
+```
+
+## In 2018, `r paste0(round((by.pm.moderate.shr+by.pm.heavy.shr+by.pm.severe.shr)*100,1),"%")` of roadways in the region were congested. By 2050, approximately `r paste0(round((cp.pm.moderate.shr+cp.pm.heavy.shr+cp.pm.severe.shr)*100,1),"%")` of roadways are forecasted to be congested, an increase of `r paste0(round((delta.congested)*100,1),"%")`
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- The region is expecting to add `r paste0(round((pop.delta)*100,0),"%")` more people and `r paste0(round((jobs.delta)*100,0),"%")` more jobs by 2050.
+
+Despite this rapid growth, investments and strategies in the Plan are lowering delay per person and limiting the growth of congestion on regional facilities to `r paste0(round((delta.congested)*100,1),"%")`, well below the amount of population and job growth.
+
+:::
+::: {.column}
+```{r pm_link_congestion, echo=FALSE}
+pm.map
+```
+:::
+::::::::::::::
+
+# Mode of Transportation
+
+## Mode Share: Commute Trips
+
+```{r wk_ms_geo_chart, echo=FALSE, fig.height=7, fig.width=15}
+ms.commute.chart
+```
+
+## Mode Share: Non-Commute Trips
+```{r nw_ms_geo_chart, echo=FALSE, fig.height=7, fig.width=15}
+ms.noncommute.chart
+```
+
+## Mode Share: Any Trip Purpose
+
+```{r any_ms_geo_chart, echo=FALSE, fig.height=7, fig.width=15}
+ms.anypurpose.chart
+```
+
+## In 2018 the average person walked and biked about 29 minutes for transporation purposes each day. By 2050, people are forecasted to walk or bike more than 35 minutes per day.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- People of Color and People of Lower Income tend to walk and bike for transportation more than the region as a whole.
+- Walking and Biking for transportation purposes is forecast to increase across the region by 2050
+
+:::
+::: {.column}
+```{r walk_bike_region, echo=FALSE}
+walk.bike.region.chart
+```
+:::
+::::::::::::::
+
+# Vehicle Miles Driven
+
+## In 2018, the average household drove more than `r toString(format(round(by.vmt.hh,-2), nsmall=0, big.mark=","))` miles per year. By the year 2050, the average household is forecast to drive approximately `r toString(format(round(cp.vmt.hh,-2), nsmall=0, big.mark=","))` miles per year, a `r toString(round(cp.vmt.ratio*100,0))`% reduction over the Base Year.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- Medium Trucks accounted for approximately `r paste0(round(by.med.truck.vmt.percent*100,1),"%")` of the total miles traveled in the region in 2018 and are forecast to be `r paste0(round(cp.med.truck.vmt.percent*100,1),"%")` in 2050.
+
+- Heavy Trucks accounted for approximately `r paste0(round(by.hvy.truck.vmt.percent*100,1),"%")` of the total miles traveled in the region in 2018 and are forecast to be `r paste0(round(cp.hvy.truck.vmt.percent*100,1),"%")` in 2050.
+
+- Buses accounted for approximately `r paste0(round(by.bus.vmt.percent*100,1),"%")` of the total miles traveled in the region in 2018 and are forecast to be `r paste0(round(cp.bus.vmt.percent*100,1),"%")` in 2050.
+
+:::
+::: {.column}
+```{r vmt_region, echo=FALSE}
+vmt.region.chart
+```
+:::
+::::::::::::::
+
+## Daily Miles Driven per Household
+```{r vmt_geo_chart, echo=FALSE, fig.height=7, fig.width=15}
+vmt.geo.chart
+```
+
+# Transit Boardings and Access
+
+## Expansion of High Capacity Transit is planned across the region in the form of rail, bus rapid transit and passenger only ferries. Transit boardings are forecasted to more than triple by 2050 with these investments.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- 7 Bus Rapid Transit Routes operated in 2018. By 2050, there will be 35 BRT routes.
+- 3 Passenger only Ferry Routes operated in 2018. By 2050, there will be 8 routes.
+
+:::
+::: {.column}
+```{r region_boardings_chart, echo=FALSE}
+boardings.region
+```
+:::
+::::::::::::::
+
+## With transit increases across the region, an even greater number of peope will have access to high quality transit service by 2050.
+
+:::::::::::::: {.columns}
+::: {.column}
+
+- By 2050, more than 58% of households will live within 1/4 miles of transit service.
+- 3/4 of all jobs in the region will be served by transit in 2050.
+
+:::
+::: {.column}
+```{r transit_access_chart, echo=FALSE}
+transit.access.chart
+```
+:::
+::::::::::::::
+
+
+# Emissions
+
+## Regional Emissions by Pollutant
+```{r re_emissions_chart, echo=FALSE, fig.height=7, fig.width=15}
+emissions.chart
+```
+
+# Next Steps
+
+## Next Steps
+
+- Continued mining of modeled output and analysis
+- Snapshots of key outputs and existing conditions to be posted on the website
+- Building of the future conditions visualization tool
+- Representation of 2050 regional growth strategy, regional capacity projects, RTP analysis
+- More detail on climate analysis – Four-Part Greenhouse Gas Strategy - and next steps
+
+# Questions? \n chelmann@psrc.org
+
