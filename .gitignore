@@ -47,4 +47,8 @@ vignettes/*.pdf
 *.xlsx
 *.xls
 *.csv
-
+*.pptx
+*.html
+*.pdf
+*/data/
+*/images/

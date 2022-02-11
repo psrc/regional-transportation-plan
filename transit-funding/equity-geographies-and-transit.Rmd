@@ -1,0 +1,681 @@
+---
+title: "Equity Geographies and Transit Service"
+date: "6/18/2021"
+output: html_document
+---
+
+```{r data-processing, include=FALSE}
+
+# Packages for Data Wrangling
+library(tidyverse)
+library(here)
+library(psrccensus)
+library(tidyr)
+
+# Packages for Maps
+library(sf)
+library(leaflet)
+
+# Packages for Tables
+library(scales)
+library(kableExtra)
+library(data.table)
+
+# Packages for Markdown
+library(knitr)
+
+c.yr <- 2018
+
+# Lists
+agency.lookup <- c("Unknown" = 0,
+                     "King County Metro" = 1,
+                     "Pierce Transit" = 2,
+                     "Community Transit" = 3,
+                     "Kitsap Transit" = 4,
+                     "WSF" = 5,
+                     "Sound Transit" = 6,
+                     "Everett Transit" = 7)
+
+agency.names <- enframe(agency.lookup)
+
+psrc.colors <- c("NonWhite" = "#91268F", "White" = "#8CC63E")
+
+county.order <- c("King County", "Kitsap County", "Pierce County", "Snohomish County", "Region")
+
+# Spatial Data
+
+wgs84 <- 4326
+spn <- 2285 
+
+create_tract_map<-function(tract.tbl, tract.lyr=tracts, tract.var, tract.color, c.title){
+
+  tbl <- tract.tbl %>% select(GEOID, all_of(tract.var)) %>% rename(population=tract.var)
+  c.layer <- left_join(tract.lyr,tbl, by = c("GEOID10"="GEOID")) %>% st_transform(wgs84)
+  
+  m.pal <- colorFactor(
+    palette = c("white", tract.color),
+    levels = c(0, 1))
+
+  m <- leaflet() %>%
+    addMapPane(name = "polygons", zIndex = 410) %>%
+    addMapPane(name = "maplabels", zIndex = 500) %>% # higher zIndex rendered on top
+
+    addProviderTiles("CartoDB.VoyagerNoLabels") %>%
+    addProviderTiles("CartoDB.VoyagerOnlyLabels",
+                     options = leafletOptions(pane = "maplabels"),
+                     group = "Labels") %>%
+
+    addPolygons(data=c.layer,
+                         fillOpacity = 0.7,
+                         fillColor = ~m.pal(population),
+                         opacity = 0.5,
+                         weight = 0.5,
+                         color = "#BCBEC0",
+                         group="Population",
+                         options = leafletOptions(pane = "polygons"),
+                         dashArray = "") %>%
+    
+    addLegend(pal = m.pal,
+              values = c.layer$populaion,
+              group = "Population",
+              position = "bottomright",
+              title = c.title) %>%
+
+    setView(lng=-122.257, lat=47.615, zoom=8.5)
+    
+  return(m)
+}
+
+create_bar_chart <- function(w.data, w.x, w.y, w.fill, w.palette=psrc.colors, w.bartype) {
+  
+  g <-  ggplot(data = w.data,
+               aes(x = get(eval(w.x)),
+                   y = get(eval(w.y)),
+                   fill = get(eval(w.color)),
+                   group=1)) +
+    geom_bar(position=w.bartype, stat="identity") +
+    geom_text(aes(label=paste0(round(get(eval(w.y))*100,0),"%")), size = 4, position = position_stack(vjust = 0.5), colour="#FFFFFF", fontface = 'bold') +
+    scale_y_continuous(labels = label_percent()) +
+    scale_fill_manual(values = w.palette) +
+    labs(x = NULL, y = NULL) +
+    theme(plot.title = element_text(size = 10, face = 'bold'),
+          axis.ticks.x = element_blank(),
+          axis.line = element_blank(),
+          panel.background = element_blank(),
+          panel.grid.major.y = element_line(colour="#BBBDC0",size = 0.25),
+          panel.grid.minor.y = element_line(colour="#BBBDC0",size = 0.25),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          legend.position = "bottom",
+          legend.title = element_blank())
+    
+  return(g)
+  
+}
+
+#tracts.above.average <- st_read(here('data','shapefiles','Tracts-above-avg-Pov-POC.shp')) %>% st_transform(spn)
+#tracts.above.half <- st_read(here('data','shapefiles','Tracts-above-50-Pov-POC.shp')) %>% st_transform(spn)
+counties <- st_read(here('data','shapefiles','counties.shp')) %>% st_transform(spn) %>% filter(psrc==1) %>% select(county_nm)
+tracts <- st_read("https://services6.arcgis.com/GWxg6t7KXELn1thE/arcgis/rest/services/tract2010_nowater/FeatureServer/0/query?where=0=0&outFields=*&f=pgeojson")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Stops Data
+
+stops.data <- read_csv(here('data','gtfs','stops.txt')) %>% select(stop_id, stop_name, stop_lat, stop_lon)
+stoptime.data <- read_csv(here('data','gtfs','stop_times.txt')) %>% select(stop_id, trip_id)
+trip.data <- read_csv(here('data','gtfs','trips.txt')) %>% select(route_id, trip_id)
+routes.data <- read_csv(here('data','gtfs','routes.csv')) %>% select(agency_id, route_id, route_type)
+
+transit.trips <- left_join(stoptime.data, trip.data, by=c("trip_id"))
+transit.trips <- left_join(transit.trips, routes.data, by=c("route_id")) %>% mutate(trip=1)
+
+# Figure out the stops that are either over half or over the regional average for People of Color and Low Income and and to trips
+stops.layer = st_as_sf(stops.data, coords = c("stop_lon", "stop_lat"), crs = wgs84) %>% st_transform(spn) %>% mutate(temp=stop_id) %>% separate(temp, c("agency", "route"), "_")
+stops.county <- st_intersection(stops.layer, counties) %>% st_drop_geometry() %>% select(stop_id,county_nm)
+
+temp <- st_intersection(stops.layer, tracts.above.half) %>% st_drop_geometry() %>% select(stop_id) %>% mutate(over_half=1)
+transit.trips <- left_join(transit.trips, temp, by=c("stop_id")) %>% mutate(over_half = replace_na(over_half,0))
+
+temp <- st_intersection(stops.layer, tracts.above.average) %>% st_drop_geometry() %>% select(stop_id) %>% mutate(over_average=1)
+transit.trips <- left_join(transit.trips, temp, by=c("stop_id")) %>% mutate(over_average = replace_na(over_average,0))
+transit.trips <- left_join(transit.trips, agency.names, by=c("agency_id"="value")) %>% rename(agency_name=name)
+transit.trips <- left_join(transit.trips, stops.county, by=c("stop_id"))
+
+unique.transit.trips <- transit.trips %>%
+    select(trip_id, agency_name, trip, over_half, over_average) %>%
+    group_by(trip_id, agency_name) %>%
+    summarize(total_stops = sum(trip), stops_over_half = sum(over_half), stops_over_average = sum(over_average)) %>%
+    mutate(percent_over_half = stops_over_half/total_stops, percent_over_average = stops_over_average/total_stops)
+
+unique.transit.trips.county <- transit.trips %>%
+    select(trip_id, county_nm, trip, over_half, over_average) %>%
+    group_by(trip_id, county_nm) %>%
+    summarize(total_stops = sum(trip), stops_over_half = sum(over_half), stops_over_average = sum(over_average)) %>%
+    mutate(percent_over_half = stops_over_half/total_stops, percent_over_average = stops_over_average/total_stops)
+
+# Daily Transit Trips by Operator
+total.trips.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit") %>% select(trip_id) %>% pull() %>% length()
+total.trips.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit") %>% select(trip_id) %>% pull() %>% length()
+total.trips.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro") %>% select(trip_id) %>% pull() %>% length()
+total.trips.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit") %>% select(trip_id) %>% pull() %>% length()
+total.trips.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit") %>% select(trip_id) %>% pull() %>% length()
+total.trips.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit") %>% select(trip_id) %>% pull() %>% length()
+
+# Daily Transit Trips by County
+total.trips.king <- unique.transit.trips.county %>% filter(county_nm=="King") %>% select(trip_id) %>% pull() %>% length()
+total.trips.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap") %>% select(trip_id) %>% pull() %>% length()
+total.trips.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce") %>% select(trip_id) %>% pull() %>% length()
+total.trips.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish") %>% select(trip_id) %>% pull() %>% length()
+
+```
+
+``` {r population-by-race-by-tract, include=FALSE}
+
+non.white.vars <- c("004","005","006","007","008","009","012")
+tract.pop.data <- get_acs_recs('tract', years=c(2019), table.names = c('B03002'))
+county.pop.data <- get_acs_recs('county', years=c(2019), table.names = c('B03002'), acs.type = 'acs5')
+
+# Census Tracts
+total.population <- tract.pop.data %>% 
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "001") %>%
+  mutate(county=substr(GEOID, 3, 5)) %>%
+  rename(total=estimate) %>%
+  select(GEOID,total, county)
+
+nonwhite.population <- tract.pop.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable %in% non.white.vars) %>%
+  select(GEOID,estimate) %>%
+  group_by(GEOID) %>%
+  summarize(total = sum(estimate)) %>%
+  rename(nonwhite=total)
+
+white.population <- tract.pop.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "003") %>%
+  rename(white=estimate) %>%
+  select(GEOID,white)
+
+tract.by.race <- left_join(total.population,nonwhite.population,by=c("GEOID"))  
+tract.by.race <- left_join(tract.by.race,white.population,by=c("GEOID"))
+
+# Counties
+total.population <- county.pop.data %>% 
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "001") %>%
+  rename(total=estimate) %>%
+  select(name,total)
+
+nonwhite.population <- county.pop.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable %in% non.white.vars) %>%
+  select(name,estimate) %>%
+  group_by(name) %>%
+  summarize(total = sum(estimate)) %>%
+  rename(nonwhite=total)
+
+white.population <- county.pop.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "003") %>%
+  rename(white=estimate) %>%
+  select(name,white)
+
+county.by.race <- left_join(total.population,nonwhite.population,by=c("name"))  
+county.by.race <- left_join(county.by.race,white.population,by=c("name"))
+
+county.by.race <- county.by.race %>%
+  mutate(NonWhite=nonwhite/total, White=white/total) %>%
+  select(-total,-white,-nonwhite) %>%
+  pivot_longer(!name, names_to="population")
+
+county.by.race$name <- factor(county.by.race$name, levels=county.order)
+
+county.by.race.chart <- create_bar_chart(w.data=county.by.race, w.x="name",w.y="value",w.fill="population",w.bartype="stack")
+
+total.pop.region <- tract.by.race %>% select(total) %>% pull() %>% sum()
+total.pop.king <- tract.by.race %>% filter(county=="033") %>% select(total) %>% pull() %>% sum()
+total.pop.kitsap <- tract.by.race %>% filter(county=="035") %>% select(total) %>% pull() %>% sum()
+total.pop.pierce <- tract.by.race %>% filter(county=="053") %>% select(total) %>% pull() %>% sum()
+total.pop.snohomish <- tract.by.race %>% filter(county=="061") %>% select(total) %>% pull() %>% sum()
+
+nonwhite.pop.region <- tract.by.race %>% select(nonwhite) %>% pull() %>% sum()
+nonwhite.pop.king <- tract.by.race %>% filter(county=="033") %>% select(nonwhite) %>% pull() %>% sum()
+nonwhite.pop.kitsap <- tract.by.race %>% filter(county=="035") %>% select(nonwhite) %>% pull() %>% sum()
+nonwhite.pop.pierce <- tract.by.race %>% filter(county=="053") %>% select(nonwhite) %>% pull() %>% sum()
+nonwhite.pop.snohomish <- tract.by.race %>% filter(county=="061") %>% select(nonwhite) %>% pull() %>% sum()
+
+nonwhite.share.region <- nonwhite.pop.region / total.pop.region
+nonwhite.share.king <- nonwhite.pop.king / total.pop.king
+nonwhite.share.kitsap <- nonwhite.pop.kitsap / total.pop.kitsap
+nonwhite.share.pierce <- nonwhite.pop.pierce / total.pop.pierce
+nonwhite.share.snohomish <- nonwhite.pop.snohomish / total.pop.snohomish
+
+tract.by.race <- tract.by.race %>%
+  mutate(nonwhite_percent = nonwhite/total) %>%
+  mutate(county_average = case_when(
+    county == "033" ~ nonwhite.share.king,
+    county == "035" ~ nonwhite.share.kitsap,
+    county == "053" ~ nonwhite.share.pierce,
+    county == "061" ~ nonwhite.share.snohomish)) %>%
+  mutate(regional_average = nonwhite.share.region) %>%
+  mutate(above_regional = case_when(
+    nonwhite_percent >= regional_average ~ 1,
+    nonwhite_percent < regional_average ~ 0)) %>%
+  mutate(above_county = case_when(
+    nonwhite_percent >= county_average ~ 1,
+    nonwhite_percent < county_average ~ 0)) %>%
+ mutate(across(everything(), ~replace_na(.x, 0)))
+
+total.pop.tracts.aboveregion.king <- tract.by.race %>% filter(above_regional==1 & county=="033") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.aboveregion.kitsap <- tract.by.race %>% filter(above_regional==1 & county=="035") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.aboveregion.pierce <- tract.by.race %>% filter(above_regional==1 & county=="053") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.aboveregion.snohomish <- tract.by.race %>% filter(above_regional==1 & county=="061") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.aboveregion.region <- tract.by.race %>% filter(above_regional==1) %>% select(total) %>% pull() %>% sum()
+
+total.pop.tracts.abovecounty.king <- tract.by.race %>% filter(above_county==1 & county=="033") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.abovecounty.kitsap <- tract.by.race %>% filter(above_county==1 & county=="035") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.abovecounty.pierce <- tract.by.race %>% filter(above_county==1 & county=="053") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.abovecounty.snohomish <- tract.by.race %>% filter(above_county==1 & county=="061") %>% select(total) %>% pull() %>% sum()
+total.pop.tracts.abovecounty.region <- tract.by.race %>% filter(above_county==1) %>% select(total) %>% pull() %>% sum()
+
+non.white.tract.map.regional <- create_tract_map(tract.tbl = tract.by.race, tract.var = "above_regional", tract.color = "#91268F", c.title = "Above Regional Average")
+non.white.tract.map.county <- create_tract_map(tract.tbl = tract.by.race, tract.var = "above_county", tract.color = "#91268F", c.title = "Above County Average")
+
+rm(nonwhite.population, total.population, tract.pop.data, white.population, non.white.vars)
+```
+
+
+```{r over-average-agency, include=FALSE}
+
+# At least 25% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.25.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.25.ct <- ovr.avg.25.ct / total.trips.ct
+shr.avg.25.et <- ovr.avg.25.et / total.trips.et
+shr.avg.25.kcm <- ovr.avg.25.kcm / total.trips.kcm
+shr.avg.25.kt <- ovr.avg.25.kt / total.trips.kt
+shr.avg.25.pt <- ovr.avg.25.pt / total.trips.pt
+shr.avg.25.st <- ovr.avg.25.st / total.trips.st
+
+# At least 50% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.50.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.50.ct <- ovr.avg.50.ct / total.trips.ct
+shr.avg.50.et <- ovr.avg.50.et / total.trips.et
+shr.avg.50.kcm <- ovr.avg.50.kcm / total.trips.kcm
+shr.avg.50.kt <- ovr.avg.50.kt / total.trips.kt
+shr.avg.50.pt <- ovr.avg.50.pt / total.trips.pt
+shr.avg.50.st <- ovr.avg.50.st / total.trips.st
+
+# At least 75% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.75.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.75.ct <- ovr.avg.75.ct / total.trips.ct
+shr.avg.75.et <- ovr.avg.75.et / total.trips.et
+shr.avg.75.kcm <- ovr.avg.75.kcm / total.trips.kcm
+shr.avg.75.kt <- ovr.avg.75.kt / total.trips.kt
+shr.avg.75.pt <- ovr.avg.75.pt / total.trips.pt
+shr.avg.75.st <- ovr.avg.75.st / total.trips.st
+
+# 100% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.100.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.100.ct <- ovr.avg.100.ct / total.trips.ct
+shr.avg.100.et <- ovr.avg.100.et / total.trips.et
+shr.avg.100.kcm <- ovr.avg.100.kcm / total.trips.kcm
+shr.avg.100.kt <- ovr.avg.100.kt / total.trips.kt
+shr.avg.100.pt <- ovr.avg.100.pt / total.trips.pt
+shr.avg.100.st <- ovr.avg.100.st / total.trips.st
+
+tbl.ovr.avg <- data.table(`Transit Agency` = c("Community Transit","Everett Transit","King County Metro","Kitsap Transit","Pierce Transit","Sound Transit"),
+                          `Daily Trips` = c(total.trips.ct,total.trips.et,total.trips.kcm,total.trips.kt,total.trips.pt,total.trips.st),
+                          `25% of Stops - Trips` = c(ovr.avg.25.ct,ovr.avg.25.et,ovr.avg.25.kcm,ovr.avg.25.kt,ovr.avg.25.pt,ovr.avg.25.st),
+                          `25% of Stops - Share` = c(shr.avg.25.ct,shr.avg.25.et,shr.avg.25.kcm,shr.avg.25.kt,shr.avg.25.pt,shr.avg.25.st),
+                          `50% of Stops - Trips` = c(ovr.avg.50.ct,ovr.avg.50.et,ovr.avg.50.kcm,ovr.avg.50.kt,ovr.avg.50.pt,ovr.avg.50.st),
+                          `50% of Stops - Share` = c(shr.avg.50.ct,shr.avg.50.et,shr.avg.50.kcm,shr.avg.50.kt,shr.avg.50.pt,shr.avg.50.st),
+                          `75% of Stops - Trips` = c(ovr.avg.75.ct,ovr.avg.75.et,ovr.avg.75.kcm,ovr.avg.75.kt,ovr.avg.75.pt,ovr.avg.75.st),
+                          `75% of Stops - Share` = c(shr.avg.75.ct,shr.avg.75.et,shr.avg.75.kcm,shr.avg.75.kt,shr.avg.75.pt,shr.avg.75.st),
+                          `All Stops - Trips` = c(ovr.avg.100.ct,ovr.avg.100.et,ovr.avg.100.kcm,ovr.avg.100.kt,ovr.avg.100.pt,ovr.avg.100.st),
+                          `All Stops - Share` = c(shr.avg.100.ct,shr.avg.100.et,shr.avg.100.kcm,shr.avg.100.kt,shr.avg.100.pt,shr.avg.100.st))
+
+temp <- tbl.ovr.avg %>%
+  mutate(`25% of Stops - Share` = percent(`25% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`50% of Stops - Share` = percent(`50% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`75% of Stops - Share` = percent(`75% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`All Stops - Share` = percent(`All Stops - Share`,accuracy = 1)) %>%
+  setNames(c("Transit Agency","Daily Trips", "Trips","Share", "Trips","Share", "Trips","Share", "Trips","Share"))
+
+final.tbl.avg <- kbl(temp, booktabs = T, align = "lccccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    add_header_above(c(" " = 2, "25% or more"=2, "50% or more" = 2, "75% or more" = 2, "All Stops" = 2)) %>%
+    footnote(general = paste0("Source: ", c.yr, " Static General Transit Feed Specification (GTFS) data by operator"), general_title = " ") %>%
+    landscape() 
+
+```
+
+```{r over-average-county, include=FALSE}
+
+# At least 25% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.25.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.25.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_average >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.25.king <- ovr.avg.25.king / total.trips.king
+shr.avg.25.kitsap <- ovr.avg.25.kitsap / total.trips.kitsap
+shr.avg.25.pierce <- ovr.avg.25.pierce / total.trips.pierce
+shr.avg.25.snohomish <- ovr.avg.25.snohomish / total.trips.snohomish
+
+# At least 50% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.50.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.50.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_average >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.50.king <- ovr.avg.50.king / total.trips.king
+shr.avg.50.kitsap <- ovr.avg.50.kitsap / total.trips.kitsap
+shr.avg.50.pierce <- ovr.avg.50.pierce / total.trips.pierce
+shr.avg.50.snohomish <- ovr.avg.50.snohomish / total.trips.snohomish
+
+# At least 75% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.75.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.75.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_average >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.75.king <- ovr.avg.75.king / total.trips.king
+shr.avg.75.kitsap <- ovr.avg.75.kitsap / total.trips.kitsap
+shr.avg.75.pierce <- ovr.avg.75.pierce / total.trips.pierce
+shr.avg.75.snohomish <- ovr.avg.75.snohomish / total.trips.snohomish
+
+
+# 100% of Stops are in an area with over the regional average of people of color and lower income
+ovr.avg.100.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.avg.100.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_average >= 1) %>% select(trip_id) %>% pull() %>% length()
+
+shr.avg.100.king <- ovr.avg.100.king / total.trips.king
+shr.avg.100.kitsap <- ovr.avg.100.kitsap / total.trips.kitsap
+shr.avg.100.pierce <- ovr.avg.100.pierce / total.trips.pierce
+shr.avg.100.snohomish <- ovr.avg.100.snohomish / total.trips.snohomish
+
+
+tbl.ovr.avg.county <- data.table(`County` = c("King County","Kitsap County","Pierce County","Snohomish County"),
+                          `Daily Trips` = c(total.trips.king,total.trips.kitsap,total.trips.pierce,total.trips.snohomish),
+                          `25% of Stops - Trips` = c(ovr.avg.25.king,ovr.avg.25.kitsap,ovr.avg.25.pierce,ovr.avg.25.snohomish),
+                          `25% of Stops - Share` = c(shr.avg.25.king,shr.avg.25.kitsap,shr.avg.25.pierce,shr.avg.25.snohomish),
+                          `50% of Stops - Trips` = c(ovr.avg.50.king,ovr.avg.50.kitsap,ovr.avg.50.pierce,ovr.avg.50.snohomish),
+                          `50% of Stops - Share` = c(shr.avg.50.king,shr.avg.50.kitsap,shr.avg.50.pierce,shr.avg.50.snohomish),
+                          `75% of Stops - Trips` = c(ovr.avg.75.king,ovr.avg.75.kitsap,ovr.avg.75.pierce,ovr.avg.75.snohomish),
+                          `75% of Stops - Share` = c(shr.avg.75.king,shr.avg.75.kitsap,shr.avg.75.pierce,shr.avg.75.snohomish),
+                          `All Stops - Trips` = c(ovr.avg.100.king,ovr.avg.100.kitsap,ovr.avg.100.pierce,ovr.avg.100.snohomish),
+                          `All Stops - Share` = c(shr.avg.100.king,shr.avg.100.kitsap,shr.avg.100.pierce,shr.avg.100.snohomish))
+
+temp <- tbl.ovr.avg.county %>%
+  mutate(`25% of Stops - Share` = percent(`25% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`50% of Stops - Share` = percent(`50% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`75% of Stops - Share` = percent(`75% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`All Stops - Share` = percent(`All Stops - Share`,accuracy = 1)) %>%
+  setNames(c("County","Daily Trips", "Trips","Share", "Trips","Share", "Trips","Share", "Trips","Share"))
+
+final.tbl.avg.county <- kbl(temp, booktabs = T, align = "lccccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    add_header_above(c(" " = 2, "25% or more"=2, "50% or more" = 2, "75% or more" = 2, "All Stops" = 2)) %>%
+    footnote(general = paste0("Source: ", c.yr, " Static General Transit Feed Specification (GTFS) data by operator"), general_title = " ") %>%
+    landscape() 
+
+```
+
+```{r over-half-agency, include=FALSE}
+
+# At least 25% of Stops are in an area with over half of people of color and lower income
+ovr.hlf.25.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.25.ct <- ovr.hlf.25.ct / total.trips.ct
+shr.hlf.25.et <- ovr.hlf.25.et / total.trips.et
+shr.hlf.25.kcm <- ovr.hlf.25.kcm / total.trips.kcm
+shr.hlf.25.kt <- ovr.hlf.25.kt / total.trips.kt
+shr.hlf.25.pt <- ovr.hlf.25.pt / total.trips.pt
+shr.hlf.25.st <- ovr.hlf.25.st / total.trips.st
+
+# At least 50% of Stops are in an area with over half of people of color and lower income
+ovr.hlf.50.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.50.ct <- ovr.hlf.50.ct / total.trips.ct
+shr.hlf.50.et <- ovr.hlf.50.et / total.trips.et
+shr.hlf.50.kcm <- ovr.hlf.50.kcm / total.trips.kcm
+shr.hlf.50.kt <- ovr.hlf.50.kt / total.trips.kt
+shr.hlf.50.pt <- ovr.hlf.50.pt / total.trips.pt
+shr.hlf.50.st <- ovr.hlf.50.st / total.trips.st
+
+# At least 75% of Stops are in an area with over half of people of color and lower income
+ovr.hlf.75.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.75.ct <- ovr.hlf.75.ct / total.trips.ct
+shr.hlf.75.et <- ovr.hlf.75.et / total.trips.et
+shr.hlf.75.kcm <- ovr.hlf.75.kcm / total.trips.kcm
+shr.hlf.75.kt <- ovr.hlf.75.kt / total.trips.kt
+shr.hlf.75.pt <- ovr.hlf.75.pt / total.trips.pt
+shr.hlf.75.st <- ovr.hlf.75.st / total.trips.st
+
+# 100% of Stops are in an area with over half of people of color and lower income
+ovr.hlf.100.ct <- unique.transit.trips %>% filter(agency_name=="Community Transit" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.et <- unique.transit.trips %>% filter(agency_name=="Everett Transit" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.kcm <- unique.transit.trips %>% filter(agency_name=="King County Metro" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.kt <- unique.transit.trips %>% filter(agency_name=="Kitsap Transit" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.pt <- unique.transit.trips %>% filter(agency_name=="Pierce Transit" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.st <- unique.transit.trips %>% filter(agency_name=="Sound Transit" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.100.ct <- ovr.hlf.100.ct / total.trips.ct
+shr.hlf.100.et <- ovr.hlf.100.et / total.trips.et
+shr.hlf.100.kcm <- ovr.hlf.100.kcm / total.trips.kcm
+shr.hlf.100.kt <- ovr.hlf.100.kt / total.trips.kt
+shr.hlf.100.pt <- ovr.hlf.100.pt / total.trips.pt
+shr.hlf.100.st <- ovr.hlf.100.st / total.trips.st
+
+tbl.ovr.hlf <- data.table(`Transit Agency` = c("Community Transit","Everett Transit","King County Metro","Kitsap Transit","Pierce Transit","Sound Transit"),
+                          `Daily Trips` = c(total.trips.ct,total.trips.et,total.trips.kcm,total.trips.kt,total.trips.pt,total.trips.st),
+                          `25% of Stops - Trips` = c(ovr.hlf.25.ct,ovr.hlf.25.et,ovr.hlf.25.kcm,ovr.hlf.25.kt,ovr.hlf.25.pt,ovr.hlf.25.st),
+                          `25% of Stops - Share` = c(shr.hlf.25.ct,shr.hlf.25.et,shr.hlf.25.kcm,shr.hlf.25.kt,shr.hlf.25.pt,shr.hlf.25.st),
+                          `50% of Stops - Trips` = c(ovr.hlf.50.ct,ovr.hlf.50.et,ovr.hlf.50.kcm,ovr.hlf.50.kt,ovr.hlf.50.pt,ovr.hlf.50.st),
+                          `50% of Stops - Share` = c(shr.hlf.50.ct,shr.hlf.50.et,shr.hlf.50.kcm,shr.hlf.50.kt,shr.hlf.50.pt,shr.hlf.50.st),
+                          `75% of Stops - Trips` = c(ovr.hlf.75.ct,ovr.hlf.75.et,ovr.hlf.75.kcm,ovr.hlf.75.kt,ovr.hlf.75.pt,ovr.hlf.75.st),
+                          `75% of Stops - Share` = c(shr.hlf.75.ct,shr.hlf.75.et,shr.hlf.75.kcm,shr.hlf.75.kt,shr.hlf.75.pt,shr.hlf.75.st),
+                          `All Stops - Trips` = c(ovr.hlf.100.ct,ovr.hlf.100.et,ovr.hlf.100.kcm,ovr.hlf.100.kt,ovr.hlf.100.pt,ovr.hlf.100.st),
+                          `All Stops - Share` = c(shr.hlf.100.ct,shr.hlf.100.et,shr.hlf.100.kcm,shr.hlf.100.kt,shr.hlf.100.pt,shr.hlf.100.st))
+
+temp <- tbl.ovr.hlf %>%
+  mutate(`25% of Stops - Share` = percent(`25% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`50% of Stops - Share` = percent(`50% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`75% of Stops - Share` = percent(`75% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`All Stops - Share` = percent(`All Stops - Share`,accuracy = 1)) %>%
+  setNames(c("Transit Agency","Daily Trips", "Trips","Share", "Trips","Share", "Trips","Share", "Trips","Share"))
+
+final.tbl.hlf <- kbl(temp, booktabs = T, align = "lccccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    add_header_above(c(" " = 2, "25% or more"=2, "50% or more" = 2, "75% or more" = 2, "All Stops" = 2)) %>%
+    footnote(general = paste0("Source: ", c.yr, " Static General Transit Feed Specification (GTFS) data by operator"), general_title = " ") %>%
+    landscape() 
+
+
+```
+
+```{r over-half-county, include=FALSE}
+
+# At least 25% of Stops are in an area with over the regional average of people of color and lower income
+ovr.hlf.25.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.25.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_half >= 0.25) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.25.king <- ovr.hlf.25.king / total.trips.king
+shr.hlf.25.kitsap <- ovr.hlf.25.kitsap / total.trips.kitsap
+shr.hlf.25.pierce <- ovr.hlf.25.pierce / total.trips.pierce
+shr.hlf.25.snohomish <- ovr.hlf.25.snohomish / total.trips.snohomish
+
+# At least 50% of Stops are in an area with over the regional average of people of color and lower income
+ovr.hlf.50.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.50.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_half >= 0.50) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.50.king <- ovr.hlf.50.king / total.trips.king
+shr.hlf.50.kitsap <- ovr.hlf.50.kitsap / total.trips.kitsap
+shr.hlf.50.pierce <- ovr.hlf.50.pierce / total.trips.pierce
+shr.hlf.50.snohomish <- ovr.hlf.50.snohomish / total.trips.snohomish
+
+# At least 75% of Stops are in an area with over the regional average of people of color and lower income
+ovr.hlf.75.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.75.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_half >= 0.75) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.75.king <- ovr.hlf.75.king / total.trips.king
+shr.hlf.75.kitsap <- ovr.hlf.75.kitsap / total.trips.kitsap
+shr.hlf.75.pierce <- ovr.hlf.75.pierce / total.trips.pierce
+shr.hlf.75.snohomish <- ovr.hlf.75.snohomish / total.trips.snohomish
+
+
+# 100% of Stops are in an area with over the regional average of people of color and lower income
+ovr.hlf.100.king <- unique.transit.trips.county %>% filter(county_nm=="King" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.kitsap <- unique.transit.trips.county %>% filter(county_nm=="Kitsap" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.pierce <- unique.transit.trips.county %>% filter(county_nm=="Pierce" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+ovr.hlf.100.snohomish <- unique.transit.trips.county %>% filter(county_nm=="Snohomish" & percent_over_half >= 1) %>% select(trip_id) %>% pull() %>% length()
+
+shr.hlf.100.king <- ovr.hlf.100.king / total.trips.king
+shr.hlf.100.kitsap <- ovr.hlf.100.kitsap / total.trips.kitsap
+shr.hlf.100.pierce <- ovr.hlf.100.pierce / total.trips.pierce
+shr.hlf.100.snohomish <- ovr.hlf.100.snohomish / total.trips.snohomish
+
+
+tbl.ovr.hlf.county <- data.table(`County` = c("King County","Kitsap County","Pierce County","Snohomish County"),
+                          `Daily Trips` = c(total.trips.king,total.trips.kitsap,total.trips.pierce,total.trips.snohomish),
+                          `25% of Stops - Trips` = c(ovr.hlf.25.king,ovr.hlf.25.kitsap,ovr.hlf.25.pierce,ovr.hlf.25.snohomish),
+                          `25% of Stops - Share` = c(shr.hlf.25.king,shr.hlf.25.kitsap,shr.hlf.25.pierce,shr.hlf.25.snohomish),
+                          `50% of Stops - Trips` = c(ovr.hlf.50.king,ovr.hlf.50.kitsap,ovr.hlf.50.pierce,ovr.hlf.50.snohomish),
+                          `50% of Stops - Share` = c(shr.hlf.50.king,shr.hlf.50.kitsap,shr.hlf.50.pierce,shr.hlf.50.snohomish),
+                          `75% of Stops - Trips` = c(ovr.hlf.75.king,ovr.hlf.75.kitsap,ovr.hlf.75.pierce,ovr.hlf.75.snohomish),
+                          `75% of Stops - Share` = c(shr.hlf.75.king,shr.hlf.75.kitsap,shr.hlf.75.pierce,shr.hlf.75.snohomish),
+                          `All Stops - Trips` = c(ovr.hlf.100.king,ovr.hlf.100.kitsap,ovr.hlf.100.pierce,ovr.hlf.100.snohomish),
+                          `All Stops - Share` = c(shr.hlf.100.king,shr.hlf.100.kitsap,shr.hlf.100.pierce,shr.hlf.100.snohomish))
+
+temp <- tbl.ovr.hlf.county %>%
+  mutate(`25% of Stops - Share` = percent(`25% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`50% of Stops - Share` = percent(`50% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`75% of Stops - Share` = percent(`75% of Stops - Share`,accuracy = 1)) %>%
+  mutate(`All Stops - Share` = percent(`All Stops - Share`,accuracy = 1)) %>%
+  setNames(c("County","Daily Trips", "Trips","Share", "Trips","Share", "Trips","Share", "Trips","Share"))
+
+final.tbl.hlf.county <- kbl(temp, booktabs = T, align = "lccccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    add_header_above(c(" " = 2, "25% or more"=2, "50% or more" = 2, "75% or more" = 2, "All Stops" = 2)) %>%
+    footnote(general = paste0("Source: ", c.yr, " Static General Transit Feed Specification (GTFS) data by operator"), general_title = " ") %>%
+    landscape() 
+
+```
+
+The tables on this page compare the location of transit service (defined by stop location) by operator with the census tract definitions for people of color and low incomes from the most recent Transportation Improvement Program Equity analysis. The transit trips that serve these stops were summarized for both census tracts above the regional average for people of color and low incomes as well as census tracts where more than half the household population are people of color and lower income.
+
+
+## Demographic Data
+PSRC developed a baseline Demographic Profile as an initial step toward better integrating equity into its transportation work program. The demographic profile presents key demographic data describing the central Puget Sound region and identifies population groups and communities to be considered for equity analyses and activities. This report is based on data from the US Census Bureau 2014-2018 American Community Survey (ACS) 5-year Estimates. 
+ 
+Executive Order No. 12898 directs federal agencies to specifically identify and address impacts on people of color and people with low incomes. 
+ 
+The demographic groups investigated in this summary are defined as: 
+ 
+* **People with Low Incomes:** Any person whose annual income fell below 200 percent of the Federal Poverty level in the American Community Survey was counted as low income. These thresholds vary by family size and range. If a family's total income is less than the federal threshold, then that family and every individual in it is considered low income.   
+*	**People of Color:** A person was counted as a person of color if he or she claimed any of the following identities in their census return: Black, American Indian or Alaskan Native, Asian, Native Hawaiian or Other Pacific Islander, or Hispanic.     
+
+## Transit Data
+Transit service data for this analysis was pulled from each agency's Static General Transit Feed Specification (GTFS) files from the spring service of 2018. Spring 2018 service was used so that the transit service data would align with the demographic data from the American Community Survey. The following details descirbe the analysis of this data:
+
+* **Daily Trips:** Trips are defined by counting the unique "trip_id" from the stop times file provided in GTFS. Operator data for each trip was provided by joining the agency ID from the "routes" file with the unique "route_id" of each transit trip in "stop_times" file. All trips operated for Sound Transit Roues were assigned to Sound Transit even though other agencies operate those routes.  
+
+* **25% or more:** These columns represent the number of daily transit trips that have at least 25% of their stops within the equity geography that was defined using Census Tract data. If a stop is within the boundary of the Census Tract it was counted, otherwise it was not. No buffer distances were used in defining the stops.  
+
+* **50% or more:** These columns represent the number of daily transit trips that have at least 50% of their stops within the equity geography that was defined using Census Tract data. If a stop is within the boundary of the Census Tract it was counted, otherwise it was not. No buffer distances were used in defining the stops. 
+
+* **75% or more:** These columns represent the number of daily transit trips that have at least 75% of their stops within the equity geography that was defined using Census Tract data. If a stop is within the boundary of the Census Tract it was counted, otherwise it was not. No buffer distances were used in defining the stops. 
+
+* **All Stops:** These columns represent the number of daily transit trips that have all their stops within the equity geography that was defined using Census Tract data. If a stop is within the boundary of the Census Tract it was counted, otherwise it was not. No buffer distances were used in defining the stops. 
+
+**Transit Service by County in Areas above the Regional Average for People of Color and Lower Incomes: 2018**
+``` {r echo=FALSE}
+tbl <- final.tbl.avg.county
+tbl
+```
+ 
+**Transit Service by Operator in Areas above the Regional Average for People of Color and Lower Incomes: 2018**
+``` {r echo=FALSE}
+tbl <- final.tbl.avg
+tbl
+```
+
+**Transit Service by County in Areas with at least 50% People of Color and Lower Incomes: 2018**
+``` {r echo=FALSE}
+tbl <- final.tbl.hlf.county
+tbl
+```
+
+**Transit Service by Operator in Areas with at least 50% People of Color and Lower Incomes: 2018**
+``` {r echo=FALSE}
+tbl <- final.tbl.hlf
+tbl
+```
+
+

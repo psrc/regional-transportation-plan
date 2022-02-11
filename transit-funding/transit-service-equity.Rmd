@@ -1,0 +1,930 @@
+---
+title: "Equity in Transit Service"
+subtitle: "Summer 2021 Service Levels"
+date: | 
+  ![](images/psrc_logo.png){width=35%}
+
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 3
+
+header-includes:
+  - \usepackage{titling}
+  - \setlength{\droptitle}{20em} 
+  
+include-before:
+- '`\newpage{}`{=latex}'
+---
+
+```{r setup, include=FALSE}
+
+# Packages for Data Wrangling
+library(tidyverse)
+library(here)
+library(psrccensus)
+library(tidyr)
+library(readr)
+library(lubridate)
+library(psrccensus)
+
+# Packages for Maps
+library(sf)
+library(leaflet)
+library(mapview)
+
+# Packages for Tables
+library(scales)
+library(kableExtra)
+library(data.table)
+
+library(knitr)
+
+census.year <- c(2019)
+transit.service.year <- 2018
+
+king.fips <- '033'
+kitsap.fips <- '035'
+pierce.fips <- '053'
+snohomish.fips <- '061'
+
+county.order <- c("King County", "Kitsap County", "Pierce County", "Snohomish County", "Region")
+
+st.express <- c("510","511","512","513","522","532","535","540","541","542","545",
+                "550","554","555","556","560","566","567","574","577","578","580",
+                "586","590","592","594","595","596")
+
+wgs84 <- 4326
+spn <- 2285 
+
+race.table <- c('B03002')
+poverty.table <- c('C17002')
+
+stop.buffer <- 5280*0.25
+equity.stop.threshold <- 0.5
+frequent.span.threshold <- 16
+frequent.hourly.trip.threshold <- 8
+express.span.threshold <- 8
+
+transit.service.period <- "Fall 2018"
+
+cost.per.service.hour <- data.table(`agency`=c(rep("CT",3), rep("ET",3), rep("KCM",3), rep("KT",3), rep("PT",3), rep("ST",3)),
+                                    `route_type`=c("Frequent", "Express", "Local"),
+                                    `cost_per_hour` = c(170,180,175))
+
+# GTFS from 2018 to 2021
+ct.url.2018 <- 'https://transitfeeds.com/p/community-transit/454/20181014/download'
+ct.url.2019 <- 'https://transitfeeds.com/p/community-transit/454/20191014/download'
+ct.url.2020 <- 'https://transitfeeds.com/p/community-transit/454/20201012/download'
+ct.url.latest <- 'https://transitfeeds.com/p/community-transit/454/latest/download'
+
+et.url.2018 <- 'https://transitfeeds.com/p/everett-transit/455/20181013/download'
+et.url.2019 <- 'https://transitfeeds.com/p/everett-transit/455/20191013/download'
+et.url.2020 <- 'https://transitfeeds.com/p/everett-transit/455/20201010/download'
+et.url.latest <- 'https://transitfeeds.com/p/everett-transit/455/latest/download'
+
+kcm.url.2018 <- 'https://transitfeeds.com/p/king-county-metro/73/20180925/download'
+kcm.url.2019 <- 'https://transitfeeds.com/p/king-county-metro/73/20191008/download'
+kcm.url.2020 <- 'https://transitfeeds.com/p/king-county-metro/73/20201016/download'
+kcm.url.latest <- 'https://transitfeeds.com/p/king-county-metro/73/latest/download'
+
+kt.url.2018 <- 'https://transitfeeds.com/p/kitsap-transit/296/20180928/download'
+kt.url.2019 <- 'https://transitfeeds.com/p/kitsap-transit/296/20191016/download'
+kt.url.2020 <- 'https://transitfeeds.com/p/kitsap-transit/296/20201027/download'
+kt.url.latest <- 'https://transitfeeds.com/p/kitsap-transit/296/latest/download'
+
+pt.url.2018 <- 'https://transitfeeds.com/p/pierce-transit/448/20180926/download'
+pt.url.2019 <- 'https://transitfeeds.com/p/pierce-transit/448/20191013/download'
+pt.url.2020 <- 'https://transitfeeds.com/p/pierce-transit/448/20201009/download'
+pt.url.latest <- 'https://transitfeeds.com/p/pierce-transit/448/latest/download'
+
+st.url.2018 <- 'https://transitfeeds.com/p/sound-transit/44/20181013/download'
+st.url.2019 <- 'https://transitfeeds.com/p/sound-transit/44/20191013/download'
+st.url.2020 <- 'https://transitfeeds.com/p/sound-transit/44/20201010/download'
+st.url.latest <- 'https://transitfeeds.com/p/sound-transit/44/latest/download'
+
+gtfs.urls <- list(list(ct.url.2018,'CT'), list(et.url.2018,'ET'), list(kcm.url.2018,'KCM'), list(kt.url.2018,'KT'), list(pt.url.2018,'PT'), list(st.url.2018,'ST'))
+
+# Spatial Data
+counties <- st_read(here('data','shapefiles','counties.shp')) %>% 
+  st_transform(spn) %>% 
+  filter(psrc==1) %>% 
+  select(county_nm)
+
+tracts <- st_read("https://services6.arcgis.com/GWxg6t7KXELn1thE/arcgis/rest/services/tract2010_nowater/FeatureServer/0/query?where=0=0&outFields=*&f=pgeojson") %>% 
+  st_transform(spn) %>% 
+  select(GEOID10, acres)
+
+# Functions
+
+create.static.map <- function(equity.lyr, county.lyr, equity.clr, c.title, img.pth, c.label) {
+
+  m <- leaflet() %>%
+    addMapPane(name = "polygons", zIndex = 410) %>%
+    addMapPane(name = "maplabels", zIndex = 500) %>% # higher zIndex rendered on top
+    
+    addProviderTiles("CartoDB.VoyagerNoLabels") %>%
+    addProviderTiles("CartoDB.VoyagerOnlyLabels",
+                     options = leafletOptions(pane = "maplabels"),
+                     group = "Labels") %>%
+    
+    addPolygons(data=county.lyr,
+                fillOpacity = 0,
+                fillColor = NULL,
+                opacity = 1,
+                weight = 2,
+                color = "#F05A28",
+                options = leafletOptions(pane = "polygons"),
+                dashArray = "") %>%  
+  
+    addPolygons(data=equity.lyr,
+                fillOpacity = 0.75,
+                fillColor = equity.clr,
+                opacity = 0.5,
+                weight = 0.5,
+                color = "#BCBEC0",
+                options = leafletOptions(pane = "polygons"),
+                dashArray = "") %>%
+
+  
+    setView(lng=-122.257, lat=47.615, zoom=8) %>%
+  
+    addLegend(values = equity.tracts$variable,
+              colors = c(equity.clr),
+              labels = c(c.label),
+              position = "bottomright",
+              title = c.title)
+
+  mapshot(m, file = img.pth)
+
+}
+
+```
+
+\listoftables
+\listoffigures
+\newpage
+
+# Introduction  
+This document is intended to highlight transit service in the Central Puget Sound Region with a focus on how the service connects to people of color and people of lower incomes. 
+
+# Defining Equity Geographies  
+Equity in this analysis is defined as people of color (using Census Race & Ethnicity definitions, all people not identifying as White, Not Hispanic or LatinX) and people of lower incomes (using Census Poverty definitions as anyone under 200% of the Federal Poverty definition). All population data by race and income is downloaded directly from the US Census Bureau's API for the 5-year American Community Survey (ACS) dataset by census tracts. More detail on the API and available census products available from the api can be found at <https://www.census.gov/data/developers/data-sets/acs-5year.html>.  
+
+The following census tables were used in this transit equity analysis:  
+
+* Population by Race and Ethnicity: **Table B03002**.  
+* Population by Ratio of Poverty Level: **Table C17002**.  
+
+## Defining Census Tracts for Equity Analysis  
+Census tracts were flagged as either being in or out of the equity area. For purposes of this analysis, a comparison of the percentage of total population by race for each census tract was compared to the countywide average for that census tract. If the percent people of color was above the countywide average for that tract, then the tract was flagged as an equity area. The same approach was then applied to the poverty data once again comparing the percentage of people of lower incomes in the census tract compared to the countywide average for that tract.  
+
+```{r equity-tract-calculations, include=FALSE}
+
+# Flag tracts by Race
+poc.vars <- c("004","005","006","007","008","009","012")
+tract.pop.data <- get_acs_recs('tract', years=census.year, table.names = race.table)
+
+total.population <- tract.pop.data %>% 
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "001") %>%
+  mutate(county=substr(GEOID, 3, 5)) %>%
+  rename(total=estimate) %>%
+  select(GEOID,total, county)
+
+poc.population <- tract.pop.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable %in% poc.vars) %>%
+  select(GEOID,estimate) %>%
+  group_by(GEOID) %>%
+  summarize(total = sum(estimate)) %>%
+  rename(poc=total)
+
+white.population <- tract.pop.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "003") %>%
+  rename(white=estimate) %>%
+  select(GEOID,white)
+
+tract.by.race <- left_join(total.population,poc.population,by=c("GEOID"))  
+tract.by.race <- left_join(tract.by.race,white.population,by=c("GEOID"))
+
+total.pop.region <- tract.by.race %>% select(total) %>% pull() %>% sum()
+total.pop.king <- tract.by.race %>% filter(county=="033") %>% select(total) %>% pull() %>% sum()
+total.pop.kitsap <- tract.by.race %>% filter(county=="035") %>% select(total) %>% pull() %>% sum()
+total.pop.pierce <- tract.by.race %>% filter(county=="053") %>% select(total) %>% pull() %>% sum()
+total.pop.snohomish <- tract.by.race %>% filter(county=="061") %>% select(total) %>% pull() %>% sum()
+
+poc.pop.region <- tract.by.race %>% select(poc) %>% pull() %>% sum()
+poc.pop.king <- tract.by.race %>% filter(county=="033") %>% select(poc) %>% pull() %>% sum()
+poc.pop.kitsap <- tract.by.race %>% filter(county=="035") %>% select(poc) %>% pull() %>% sum()
+poc.pop.pierce <- tract.by.race %>% filter(county=="053") %>% select(poc) %>% pull() %>% sum()
+poc.pop.snohomish <- tract.by.race %>% filter(county=="061") %>% select(poc) %>% pull() %>% sum()
+
+poc.share.region <- poc.pop.region / total.pop.region
+poc.share.king <- poc.pop.king / total.pop.king
+poc.share.kitsap <- poc.pop.kitsap / total.pop.kitsap
+poc.share.pierce <- poc.pop.pierce / total.pop.pierce
+poc.share.snohomish <- poc.pop.snohomish / total.pop.snohomish
+
+tract.by.race <- tract.by.race %>%
+  mutate(poc_percent = poc/total) %>%
+  mutate(county_average = case_when(
+    county == "033" ~ poc.share.king,
+    county == "035" ~ poc.share.kitsap,
+    county == "053" ~ poc.share.pierce,
+    county == "061" ~ poc.share.snohomish)) %>%
+  mutate(regional_average = poc.share.region) %>%
+  mutate(poc_above_regional = case_when(
+    poc_percent >= regional_average ~ 1,
+    poc_percent < regional_average ~ 0)) %>%
+  mutate(poc_above_county = case_when(
+    poc_percent >= county_average ~ 1,
+    poc_percent < county_average ~ 0)) %>%
+  mutate(across(everything(), ~replace_na(.x, 0)))
+
+tract.by.race <- tract.by.race %>% select(GEOID,poc_percent,poc_above_regional,poc_above_county)
+
+rm(poc.population, total.population, white.population, tract.pop.data)
+
+# Flag Tracts by Income
+inc.vars <- c("002","003","004","005","006","007")
+
+tract.income.data <- get_acs_recs('tract', years=census.year, table.names = poverty.table)
+  
+total.population <- tract.income.data %>% 
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable == "001") %>%
+  mutate(county=substr(GEOID, 3, 5)) %>%
+  rename(total=estimate) %>%
+  select(GEOID,total, county)
+
+low.income.population <- tract.income.data %>%
+  separate(variable,into=c("table","variable"), "_") %>%
+  filter(variable %in% inc.vars) %>%
+  select(GEOID,estimate) %>%
+  group_by(GEOID) %>%
+  summarize(total = sum(estimate)) %>%
+  rename(lowinc=total)
+
+tract.by.income <- left_join(total.population, low.income.population,by=c("GEOID"))  
+
+total.pop.region <- tract.by.income %>% select(total) %>% pull() %>% sum()
+total.pop.king <- tract.by.income %>% filter(county=="033") %>% select(total) %>% pull() %>% sum()
+total.pop.kitsap <- tract.by.income %>% filter(county=="035") %>% select(total) %>% pull() %>% sum()
+total.pop.pierce <- tract.by.income %>% filter(county=="053") %>% select(total) %>% pull() %>% sum()
+total.pop.snohomish <- tract.by.income %>% filter(county=="061") %>% select(total) %>% pull() %>% sum()
+
+lowinc.pop.region <- tract.by.income %>% select(lowinc) %>% pull() %>% sum()
+lowinc.pop.king <- tract.by.income %>% filter(county=="033") %>% select(lowinc) %>% pull() %>% sum()
+lowinc.pop.kitsap <- tract.by.income %>% filter(county=="035") %>% select(lowinc) %>% pull() %>% sum()
+lowinc.pop.pierce <- tract.by.income %>% filter(county=="053") %>% select(lowinc) %>% pull() %>% sum()
+lowinc.pop.snohomish <- tract.by.income %>% filter(county=="061") %>% select(lowinc) %>% pull() %>% sum()
+
+lowinc.share.region <- lowinc.pop.region / total.pop.region
+lowinc.share.king <- lowinc.pop.king / total.pop.king
+lowinc.share.kitsap <- lowinc.pop.kitsap / total.pop.kitsap
+lowinc.share.pierce <- lowinc.pop.pierce / total.pop.pierce
+lowinc.share.snohomish <- lowinc.pop.snohomish / total.pop.snohomish
+
+tract.by.income <- tract.by.income %>%
+  mutate(pov_percent = lowinc/total) %>%
+  mutate(county_average = case_when(
+    county == "033" ~ lowinc.share.king,
+    county == "035" ~ lowinc.share.kitsap,
+    county == "053" ~ lowinc.share.pierce,
+    county == "061" ~ lowinc.share.snohomish)) %>%
+  mutate(regional_average = lowinc.share.region) %>%
+  mutate(pov_above_regional = case_when(
+    pov_percent >= regional_average ~ 1,
+    pov_percent < regional_average ~ 0)) %>%
+  mutate(pov_above_county = case_when(
+    pov_percent >= county_average ~ 1,
+    pov_percent < county_average ~ 0)) %>%
+  mutate(across(everything(), ~replace_na(.x, 0)))
+
+tract.by.income <- tract.by.income %>% select(GEOID,pov_percent,pov_above_regional,pov_above_county)
+
+rm(tract.income.data, total.population, low.income.population)
+
+# Combine People of Color and Poverty infromation with All Tracts and Summarize
+tracts <- left_join(tracts,tract.by.race, by=c("GEOID10"="GEOID"))
+tracts <- left_join(tracts,tract.by.income, by=c("GEOID10"="GEOID"))
+
+rm(tract.by.race, tract.by.income)
+
+tracts <- tracts %>%
+  mutate(equity_above_regional = case_when(
+    (poc_above_regional==1 | pov_above_regional==1) ~ 1,
+    (poc_above_regional==0 & pov_above_regional==0) ~ 0)) %>%
+  mutate(equity_above_county = case_when(
+    (poc_above_county==1 | pov_above_county==1) ~ 1,
+    (poc_above_county==0 & pov_above_county==0) ~ 0)) %>%
+  mutate(county=substr(GEOID10, 3, 5))
+
+# Total Tracts by County
+total.tracts.king <- tracts %>% select(county) %>% filter(county==king.fips) %>% pull() %>% length()
+total.tracts.kitsap <- tracts %>% select(county) %>% filter(county==kitsap.fips) %>% pull() %>% length()
+total.tracts.pierce <- tracts %>% select(county) %>% filter(county==pierce.fips) %>% pull() %>% length()
+total.tracts.snohomish <- tracts %>% select(county) %>% filter(county==snohomish.fips) %>% pull() %>% length()
+total.tracts.region <- tracts %>% select(county) %>% pull() %>% length()
+
+# People of Color Tracts by County - Above County Average
+poc.county.tracts.king <- tracts %>% select(county,poc_above_county) %>% filter(county==king.fips & poc_above_county==1) %>% pull() %>% length()
+poc.county.tracts.kitsap <- tracts %>% select(county,poc_above_county) %>% filter(county==kitsap.fips & poc_above_county==1) %>% pull() %>% length()
+poc.county.tracts.pierce <- tracts %>% select(county,poc_above_county) %>% filter(county==pierce.fips & poc_above_county==1) %>% pull() %>% length()
+poc.county.tracts.snohomish <- tracts %>% select(county,poc_above_county) %>% filter(county==snohomish.fips & poc_above_county==1) %>% pull() %>% length()
+poc.county.tracts.region <- tracts %>% select(county,poc_above_county) %>% filter(poc_above_county==1) %>% pull() %>% length()
+
+# People in Poverty Tracts by County - Above County Average
+pov.county.tracts.king <- tracts %>% select(county,pov_above_county) %>% filter(county==king.fips & pov_above_county==1) %>% pull() %>% length()
+pov.county.tracts.kitsap <- tracts %>% select(county,pov_above_county) %>% filter(county==kitsap.fips & pov_above_county==1) %>% pull() %>% length()
+pov.county.tracts.pierce <- tracts %>% select(county,pov_above_county) %>% filter(county==pierce.fips & pov_above_county==1) %>% pull() %>% length()
+pov.county.tracts.snohomish <- tracts %>% select(county,pov_above_county) %>% filter(county==snohomish.fips & pov_above_county==1) %>% pull() %>% length()
+pov.county.tracts.region <- tracts %>% select(county,pov_above_county) %>% filter(pov_above_county==1) %>% pull() %>% length()
+
+# People in Equity Tracts by County - Above County Average
+equity.county.tracts.king <- tracts %>% select(county,equity_above_county) %>% filter(county==king.fips & equity_above_county==1) %>% pull() %>% length()
+equity.county.tracts.kitsap <- tracts %>% select(county,equity_above_county) %>% filter(county==kitsap.fips & equity_above_county==1) %>% pull() %>% length()
+equity.county.tracts.pierce <- tracts %>% select(county,equity_above_county) %>% filter(county==pierce.fips & equity_above_county==1) %>% pull() %>% length()
+equity.county.tracts.snohomish <- tracts %>% select(county,equity_above_county) %>% filter(county==snohomish.fips & equity_above_county==1) %>% pull() %>% length()
+equity.county.tracts.region <- tracts %>% select(county,equity_above_county) %>% filter(equity_above_county==1) %>% pull() %>% length()
+
+# Create a Table to summarize the output
+equity.tracts.table <- data.table(`County` = c("King County", "Kitsap County", "Pierce County", "Snohomish County", "Region"),
+                                  `Total Tracts` = c(total.tracts.king, total.tracts.kitsap, total.tracts.pierce, total.tracts.snohomish, total.tracts.region),
+                                  `People of Color Tracts` = c(poc.county.tracts.king, 
+                                                               poc.county.tracts.kitsap, 
+                                                               poc.county.tracts.pierce, 
+                                                               poc.county.tracts.snohomish, 
+                                                               poc.county.tracts.region),
+                                  `% People of Color Tracts` = c(poc.county.tracts.king/total.tracts.king,
+                                                                 poc.county.tracts.kitsap/total.tracts.kitsap, 
+                                                                 poc.county.tracts.pierce/total.tracts.pierce,
+                                                                 poc.county.tracts.snohomish/total.tracts.snohomish,
+                                                                 poc.county.tracts.region/total.tracts.region),
+                                  `Lower Income Tracts` = c(pov.county.tracts.king, 
+                                                            pov.county.tracts.kitsap, 
+                                                            pov.county.tracts.pierce, 
+                                                            pov.county.tracts.snohomish, 
+                                                            pov.county.tracts.region),
+                                  `% Lower Income Tracts` = c(pov.county.tracts.king/total.tracts.king, 
+                                                            pov.county.tracts.kitsap/total.tracts.kitsap, 
+                                                            pov.county.tracts.pierce/total.tracts.pierce, 
+                                                            pov.county.tracts.snohomish/total.tracts.snohomish, 
+                                                            pov.county.tracts.region/total.tracts.region),
+                                  `Equity Tracts` = c(equity.county.tracts.king, 
+                                                      equity.county.tracts.kitsap, 
+                                                      equity.county.tracts.pierce, 
+                                                      equity.county.tracts.snohomish, 
+                                                      equity.county.tracts.region),
+                                  `% Equity Tracts` = c(equity.county.tracts.king/total.tracts.king, 
+                                                      equity.county.tracts.kitsap/total.tracts.kitsap, 
+                                                      equity.county.tracts.pierce/total.tracts.pierce, 
+                                                      equity.county.tracts.snohomish/total.tracts.snohomish, 
+                                                      equity.county.tracts.region/total.tracts.region))
+
+temp <- equity.tracts.table %>%
+  mutate(`% People of Color Tracts` = percent(`% People of Color Tracts`,accuracy = 1)) %>%
+  mutate(`% Lower Income Tracts` = percent(`% Lower Income Tracts`,accuracy = 1)) %>%
+  mutate(`% Equity Tracts` = percent(`% Equity Tracts`,accuracy = 1)) %>%
+  setNames(c("County","Census Tracts", "Census Tracts","Share", "Census Tracts","Share", "Census Tracts","Share"))
+
+final.equity.tracts.table <- kbl(temp, caption = paste0("Census Tracts by County and Equity Geography: ", census.year), booktabs = T, align = "lccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    kable_styling(latex_options = "hold_position") %>%
+    add_header_above(c(" " = 2, "People of Color"=2, "People of Lower Incomes" = 2, "Equity Geography" = 2)) %>%
+    footnote(general = paste0("Source: ", census.year, " American Community Survey (ACS) 5-year Data Tables ", race.table," & ", poverty.table), general_title = " ")
+
+
+# Create a Map of Equity Areas
+equity.tracts <- tracts %>%
+  select(equity_above_county) %>%
+  filter(equity_above_county==1) %>%
+  st_union() %>% 
+  st_sf() %>%
+  mutate(variable="Above County Average") %>%
+  st_transform(wgs84)
+
+poc.tracts <- tracts %>%
+  select(poc_above_county) %>%
+  filter(poc_above_county==1) %>%
+  st_union() %>% 
+  st_sf() %>%
+  mutate(variable="Above County Average") %>%
+  st_transform(wgs84)
+
+pov.tracts <- tracts %>%
+  select(pov_above_county) %>%
+  filter(pov_above_county==1) %>%
+  st_union() %>% 
+  st_sf() %>%
+  mutate(variable="Above County Average") %>%
+  st_transform(wgs84)
+
+county.boundaries <- counties %>%
+  st_transform(wgs84)
+
+create.static.map(equity.lyr=equity.tracts, county.lyr=county.boundaries, equity.clr= "#91268F", c.title="Equity Geography", c.label="Above County Average", img.pth="images/equity-geographies.png")
+
+create.static.map(equity.lyr=poc.tracts, county.lyr=county.boundaries, equity.clr= "#00A7A0", c.title="People of Color", c.label="Above County Average", img.pth="images/poc-geographies.png")
+
+create.static.map(equity.lyr=pov.tracts, county.lyr=county.boundaries, equity.clr= "#8CC63E", c.title="People of Lower Income", c.label="Above County Average", img.pth="images/pov-geographies.png")
+
+```
+
+Areas with higher shares of people of color and people of lower incomes are shown in Figure 1. As shown in the maps, many tracts overlap between people of color and lower incomes. For this analysis, equity areas were also defined for any census tract with a higher share of people of color **or** any tract with a higher share of people of lower incomes.
+
+``` {r echo=FALSE, out.width = "33%", fig.cap = "Equity Geographies", fig.show = 'hold'}
+knitr::include_graphics(path=c("images/poc-geographies.png","images/pov-geographies.png","images/equity-geographies.png"))
+```
+
+\newpage
+
+A summary table of the number of census tracts by county and type of equity area is included in Table 1.
+``` {r echo=FALSE}
+final.equity.tracts.table
+```
+
+# Transit Service
+The transit data is processed directly from transit agency General Transit Feed Specification (GTFS) data from <https://transitfeeds.com/feeds>.  
+
+## `r transit.service.period` Levels
+The latest GTFS feeds by operator are available for July 2021. This service period reflects the latest levels of transit service being provided while many office workers in major employment hubs continue to work remotely. It is anticipated that service levels will begin to ramp up in Fall 2021 and Winter 2022 as more people return to work around the region.
+```{r transit-routes-latest, include=FALSE}
+
+# Process GTFS files and create one regional gtfs feed for analysis
+
+region.stops <- NULL
+region.routes <- NULL
+region.trips <- NULL
+region.calendar <- NULL
+region.stop.times <- NULL
+
+for (gtfs in gtfs.urls) {
+  
+  print(paste0('Working on ', gtfs[[2]]))
+  
+  # Download the latest GTFS archive from the Transit Feeds
+  download.file(gtfs[[1]], "working.zip", quiet = TRUE, mode = "wb")
+  
+  # Pull Out Routes, Stops
+  current.stops <- readr::read_csv(unz("working.zip","stops.txt"), show_col_types = FALSE) %>%
+    mutate(agency=gtfs[[2]]) %>%
+    mutate(stop_id = paste0(agency,"_",stop_id)) %>%
+    select(stop_id, agency, stop_name, stop_lat, stop_lon)
+  
+  current.routes <- readr::read_csv(unz("working.zip","routes.txt"), show_col_types = FALSE) %>%
+    mutate(agency=gtfs[[2]]) %>%
+    mutate(route_id = paste0(agency,"_",route_id)) %>%
+    select(route_id, agency, route_short_name, route_long_name, route_type) %>%
+    mutate(route_short_name = as.character(route_short_name))
+  
+  current.calendar <- readr::read_csv(unz("working.zip","calendar.txt"), show_col_types = FALSE) %>%
+    mutate(agency=gtfs[[2]]) %>%
+    mutate(service_id = paste0(agency,"_",service_id))
+  
+  current.trips <- readr::read_csv(unz("working.zip","trips.txt"), show_col_types = FALSE) %>%
+    mutate(agency=gtfs[[2]]) %>%
+    mutate(route_id = paste0(agency,"_",route_id), trip_id = paste0(agency,"_",trip_id), service_id = paste0(agency,"_",service_id)) %>%
+    select(route_id, agency, trip_id, service_id, direction_id)
+  
+  current.stop.times <- readr::read_csv(unz("working.zip","stop_times.txt"), show_col_types = FALSE) %>%
+    mutate(agency=gtfs[[2]]) %>%
+    mutate(stop_id = paste0(agency,"_",stop_id), trip_id = paste0(agency,"_",trip_id)) %>%
+    select(trip_id, agency, arrival_time, departure_time, stop_id, stop_sequence) %>%
+    mutate(arrival_time = hms(arrival_time), departure_time = hms(departure_time))
+  
+  # Combine into a Regional File
+  ifelse(is.null(region.stops), region.stops <- current.stops, region.stops <- bind_rows(region.stops, current.stops))
+  ifelse(is.null(region.routes), region.routes <- current.routes, region.routes <- bind_rows(region.routes, current.routes))
+  ifelse(is.null(region.trips), region.trips <- current.trips, region.trips <- bind_rows(region.trips, current.trips))
+  ifelse(is.null(region.calendar), region.calendar <- current.calendar, region.calendar <- bind_rows(region.calendar, current.calendar))
+  ifelse(is.null(region.stop.times), region.stop.times <- current.stop.times, region.stop.times <- bind_rows(region.stop.times, current.stop.times))
+
+}
+
+rm(current.stops, current.routes, current.calendar, current.trips, current.stop.times, gtfs)
+
+# Trim down stop times to only include Weekday Service
+
+# Identify the weekday service from the calendar - weekday is M-F
+weekday.service.ids <- region.calendar %>%
+  mutate(weekday = case_when(
+    (monday==1 | tuesday==1 | wednesday==1 | thursday==1 | friday==1) ~ 1,
+    (service_id=="CT_MCOB-DO:121:0:Weekday:1:18SEP:12345"|service_id=="CT_MCOB-DO:122:0:Weekday:2:18SEP:12345") ~ 1,
+    str_detect(service_id, 'MAR') ~ 0)) %>%
+  mutate(weekday = replace_na(weekday, 0)) %>%
+  select(service_id,weekday)
+
+region.trips <- left_join(region.trips, weekday.service.ids, by=c("service_id")) %>% select(-agency)
+region.stop.times <- left_join(region.stop.times, region.trips, by=c("trip_id"))
+
+weekday.stop.times <- region.stop.times %>% 
+  filter(weekday==1, stop_sequence==1) %>%
+  mutate(trip_hour=arrival_time@hour)
+
+route.trips.hour <- weekday.stop.times %>% 
+  select(route_id, trip_hour) %>%
+  mutate(trip=1) %>%
+  group_by(route_id, trip_hour) %>%
+  summarize(trips=sum(trip))
+
+route.hours.of.service <- route.trips.hour %>% 
+  mutate(any_trips=1) %>%
+  mutate(frequent_trips = case_when(
+    trips>=8 ~ 1,
+    trips<8 ~ 0)) %>%
+  select(-trip_hour) %>%
+  group_by(route_id) %>%
+  summarize(total_span = sum(any_trips), frequent_span = sum(frequent_trips), daily_trips = sum(trips)) %>%
+  mutate(avg_hourly_trips_per_span = daily_trips/total_span, avg_hourly_trips_per_day = daily_trips/20)
+
+route.names <- region.routes %>% select(route_id, agency, route_short_name)
+
+route.hours.of.service <- left_join(route.hours.of.service, route.names, by=c("route_id"))
+
+# Fix operator for ST Express routes to be ST
+
+route.hours.of.service <- route.hours.of.service %>%
+  mutate(temp = case_when(
+    route_short_name %in% st.express ~ "ST",
+    !(route_short_name %in% st.express) ~ agency)) %>%
+  mutate(agency=temp) %>%
+  select(-temp) %>%
+  mutate(temp = case_when(
+    is.na(route_short_name) ~ route_id,
+    !(is.na(route_short_name)) ~ route_short_name)) %>%
+  mutate(route_short_name=temp) %>%
+  select(-temp)
+
+# Determine if stops are in equity geographies
+stops.layer <- st_as_sf(region.stops, coords = c("stop_lon", "stop_lat"), crs = wgs84) %>% st_transform(spn) 
+
+poc.tracts <- poc.tracts %>% st_transform(spn)
+pov.tracts <- pov.tracts %>% st_transform(spn)
+equity.tracts <- equity.tracts %>% st_transform(spn)
+
+poc.overlay <- st_intersection(stops.layer, poc.tracts) %>% st_drop_geometry() %>% select(stop_id,variable) %>% mutate(variable=1) %>% rename(poc_geography=variable)
+pov.overlay <- st_intersection(stops.layer, pov.tracts) %>% st_drop_geometry() %>% select(stop_id,variable) %>% mutate(variable=1) %>% rename(pov_geography=variable)
+equity.overlay <- st_intersection(stops.layer, equity.tracts) %>% st_drop_geometry() %>% select(stop_id,variable) %>% mutate(variable=1) %>% rename(equity_geography=variable)
+
+region.stop.times <- left_join(region.stop.times, poc.overlay, by=c("stop_id")) %>% mutate(poc_geography = replace_na(poc_geography,0))
+region.stop.times <- left_join(region.stop.times, pov.overlay, by=c("stop_id")) %>% mutate(pov_geography = replace_na(pov_geography,0))
+region.stop.times <- left_join(region.stop.times, equity.overlay, by=c("stop_id")) %>% mutate(equity_geography = replace_na(equity_geography,0))
+
+equity.routes <- region.stop.times %>% 
+  filter(weekday==1) %>%
+  mutate(stops=1) %>%
+  select(trip_id, route_id, poc_geography, pov_geography, equity_geography, stops) %>%
+  group_by(trip_id, route_id) %>%
+  summarize(total_stops = sum(stops), poc_stops = sum(poc_geography), pov_stops = sum(pov_geography), equity_stops = sum(equity_geography)) %>%
+  mutate(percent_poc_stops = poc_stops/total_stops, percent_pov_stops = pov_stops/total_stops, percent_equity_stops = equity_stops/total_stops)
+
+route.ids.serving.poc <- equity.routes %>% filter(percent_poc_stops >= equity.stop.threshold) %>% pull(route_id) %>% unique()
+route.ids.serving.pov <- equity.routes %>% filter(percent_pov_stops >= equity.stop.threshold) %>% pull(route_id) %>% unique()
+route.ids.serving.equity <- equity.routes %>% filter(percent_equity_stops >= equity.stop.threshold) %>% pull(route_id) %>% unique()
+
+route.hours.of.service <- route.hours.of.service %>%
+  mutate(poc_route = case_when(
+    route_id %in% route.ids.serving.poc ~ 1,
+    !(route_id %in% route.ids.serving.poc) ~ 0)) %>%
+  mutate(pov_route = case_when(
+    route_id %in% route.ids.serving.pov ~ 1,
+    !(route_id %in% route.ids.serving.pov) ~ 0)) %>%
+  mutate(equity_route = case_when(
+    route_id %in% route.ids.serving.equity ~ 1,
+    !(route_id %in% route.ids.serving.equity) ~ 0))
+
+# Define Route Type as Frequent, Express or Local
+route.hours.of.service <- route.hours.of.service %>%
+  mutate(route_type = case_when(
+    frequent_span>=frequent.span.threshold ~ "Frequent",
+    total_span<=express.span.threshold ~ "Express",
+    total_span>express.span.threshold & frequent_span<frequent.span.threshold ~ "Local"))
+
+##################################################################################################################################################
+##################################################################################################################################################
+# Calculate Weighted Average Span and Frequency by Agency and Route Type
+##################################################################################################################################################
+##################################################################################################################################################
+temp.all <- route.hours.of.service %>%
+  mutate(span_trips = total_span*daily_trips, routes=1) %>%
+  select(agency, route_type, total_span, daily_trips, span_trips, routes) %>%
+  group_by(agency, route_type) %>%
+  summarize(span_sum=sum(total_span), trips=sum(daily_trips), span_trips=sum(span_trips), all_routes=sum(routes)) %>%
+  mutate(all_avg_span = round(span_trips / trips, 1), all_avg_daily_trips = round((trips/all_routes), 0)) %>%
+  select(agency, route_type, all_routes, all_avg_daily_trips, all_avg_span)
+
+temp.poc <- route.hours.of.service %>%
+  filter(poc_route==1) %>%
+  mutate(span_trips = total_span*daily_trips, routes=1) %>%
+  select(agency, route_type, total_span, daily_trips, span_trips, routes) %>%
+  group_by(agency, route_type) %>%
+  summarize(span_sum=sum(total_span), trips=sum(daily_trips), span_trips=sum(span_trips), poc_routes=sum(routes)) %>%
+  mutate(poc_avg_span = round(span_trips / trips, 1), poc_avg_daily_trips = round((trips/poc_routes), 0)) %>%
+  select(agency, route_type, poc_routes, poc_avg_daily_trips, poc_avg_span)
+
+temp.pov <- route.hours.of.service %>%
+  filter(pov_route==1) %>%
+  mutate(span_trips = total_span*daily_trips, routes=1) %>%
+  select(agency, route_type, total_span, daily_trips, span_trips, routes) %>%
+  group_by(agency, route_type) %>%
+  summarize(span_sum=sum(total_span), trips=sum(daily_trips), span_trips=sum(span_trips), pov_routes=sum(routes)) %>%
+  mutate(pov_avg_span = round(span_trips / trips, 1), pov_avg_daily_trips = round((trips/pov_routes), 0)) %>%
+  select(agency, route_type, pov_routes, pov_avg_daily_trips, pov_avg_span)
+
+temp.equ <- route.hours.of.service %>%
+  filter(equity_route==1) %>%
+  mutate(span_trips = total_span*daily_trips, routes=1) %>%
+  select(agency, route_type, total_span, daily_trips, span_trips, routes) %>%
+  group_by(agency, route_type) %>%
+  summarize(span_sum=sum(total_span), trips=sum(daily_trips), span_trips=sum(span_trips), equ_routes=sum(routes)) %>%
+  mutate(equ_avg_span = round(span_trips / trips, 1), equ_avg_daily_trips = round((trips/equ_routes), 0)) %>%
+  select(agency, route_type, equ_routes, equ_avg_daily_trips, equ_avg_span)
+
+
+routes.agency.summary <- data.table(`agency`=c(rep("CT",3), rep("ET",3), rep("KCM",3), rep("KT",3), rep("PT",3), rep("ST",3)),
+                                    `route_type`=c("Frequent", "Express", "Local"))
+
+routes.agency.summary <- left_join(routes.agency.summary, temp.all, by=c("agency","route_type"))
+routes.agency.summary <- left_join(routes.agency.summary, temp.poc, by=c("agency","route_type"))
+routes.agency.summary <- left_join(routes.agency.summary, temp.pov, by=c("agency","route_type"))
+routes.agency.summary <- left_join(routes.agency.summary, temp.equ, by=c("agency","route_type"))
+  
+temp <- routes.agency.summary %>%
+  select(-agency) %>%
+  mutate(across(everything(), ~replace_na(.x, "-"))) %>%
+  setNames(c("Type of Service", 
+             "# of Routes", "Averge Daily Trips", "Average Span (hrs)",
+             "# of Routes", "Averge Daily Trips", "Average Span (hrs)",
+             "# of Routes", "Averge Daily Trips", "Average Span (hrs)",
+             "# of Routes", "Averge Daily Trips", "Average Span (hrs)"))
+  
+final.span.trips.table <- kbl(temp, caption = paste0("Transit Agency Summary by Route Type and Equity Geography: ", transit.service.period), booktabs = T, align = "lcccccccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    kable_styling(latex_options = "hold_position") %>%
+    add_header_above(c(" " = 1, "All Routes" = 3, "Routes Serving People of Color" = 3, "Routes Serving People of Lower Incomes" = 3, "Routes Serving Either People of Color or Lower Incomes" = 3)) %>%
+    pack_rows(index=c("Community Transit"=3,"Everett Transit"=3,"King County Metro"=3, "Kitsap Transit"=3, "Pierce Transit"=3, "Sound Transit"=3)) %>%
+    footnote(general = paste0("Source: ", transit.service.period," GTFS by Agency"), general_title = " ") %>%
+    landscape() 
+
+rm(temp.all, temp.poc, temp.pov, temp.equ, temp)
+
+##################################################################################################################################################
+##################################################################################################################################################
+# Calculate Total Trips by Agency and Route Type by Equity Geographies
+##################################################################################################################################################
+##################################################################################################################################################
+temp.all <- route.hours.of.service %>%
+  select(agency, route_type, daily_trips) %>%
+  group_by(agency, route_type) %>%
+  summarize(all_trips=sum(daily_trips)) %>%
+  select(agency, route_type, all_trips)
+
+temp.poc <- route.hours.of.service %>%
+  filter(poc_route==1) %>%
+  select(agency, route_type, daily_trips) %>%
+  group_by(agency, route_type) %>%
+  summarize(poc_trips=sum(daily_trips)) %>%
+  select(agency, route_type, poc_trips)
+
+temp.pov <- route.hours.of.service %>%
+  filter(pov_route==1) %>%
+  select(agency, route_type, daily_trips) %>%
+  group_by(agency, route_type) %>%
+  summarize(pov_trips=sum(daily_trips)) %>%
+  select(agency, route_type, pov_trips)
+
+temp.equ <- route.hours.of.service %>%
+  filter(equity_route==1) %>%
+  select(agency, route_type, daily_trips) %>%
+  group_by(agency, route_type) %>%
+  summarize(equ_trips=sum(daily_trips)) %>%
+  select(agency, route_type, equ_trips)
+
+agency.trips.summary <- data.table(`agency`=c(rep("CT",3), rep("ET",3), rep("KCM",3), rep("KT",3), rep("PT",3), rep("ST",3)),
+                                    `route_type`=c("Frequent", "Express", "Local"))
+
+agency.trips.summary <- left_join(agency.trips.summary, temp.all, by=c("agency","route_type"))
+agency.trips.summary <- left_join(agency.trips.summary, temp.poc, by=c("agency","route_type"))
+agency.trips.summary <- left_join(agency.trips.summary, temp.pov, by=c("agency","route_type"))
+agency.trips.summary <- left_join(agency.trips.summary, temp.equ, by=c("agency","route_type"))
+
+agency.trips.summary <- agency.trips.summary %>%
+  mutate(poc_trips_share=poc_trips/all_trips, pov_trips_share=pov_trips/all_trips, equ_trips_share=equ_trips/all_trips) %>%
+  select(agency, route_type, all_trips, poc_trips, poc_trips_share, pov_trips, pov_trips_share, equ_trips, equ_trips_share)
+
+temp <- agency.trips.summary %>%
+  select(-agency) %>%
+  mutate(`poc_trips_share` = percent(`poc_trips_share`,accuracy = 1)) %>%
+  mutate(`pov_trips_share` = percent(`pov_trips_share`,accuracy = 1)) %>%
+  mutate(`equ_trips_share` = percent(`equ_trips_share`,accuracy = 1)) %>%
+  mutate(across(everything(), ~replace_na(.x, "-"))) %>%
+  setNames(c("Type of Service", "Daily Trips",
+             "Trips", "Percentage",
+             "Trips", "Percentage",
+             "Trips", "Percentage"))
+
+final.equity.routes.table <- kbl(temp, caption = paste0("Transit Trips by Agency and Equity Geography: ", transit.service.period), booktabs = T, align = "lccccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    kable_styling(latex_options = "hold_position") %>%
+    add_header_above(c(" " = 2, "Trips Serving People of Color"=2, "Trips Serving People of Lower Incomes" = 2, "Trips Serving Either People of Color or Lower Incomes" = 2)) %>%
+    pack_rows(index=c("Community Transit"=3,"Everett Transit"=3,"King County Metro"=3, "Kitsap Transit"=3, "Pierce Transit"=3, "Sound Transit"=3)) %>%
+    footnote(general = paste0("Source: ", transit.service.period," GTFS by Agency"), general_title = " ")
+
+rm(temp.all, temp.poc, temp.pov, temp.equ, temp)
+
+##################################################################################################################################################
+##################################################################################################################################################
+# Calculate Running Time for Trips
+##################################################################################################################################################
+##################################################################################################################################################
+trip.run.time <- region.stop.times %>%
+  filter(weekday==1) %>%
+  select(trip_id,stop_sequence) %>%
+  group_by(trip_id) %>%
+  summarize(first_stop = min(stop_sequence), last_stop = max(stop_sequence)) 
+
+trip.start.time <- region.stop.times %>%
+  filter(weekday==1) %>%
+  select(trip_id,stop_sequence,arrival_time) %>%
+  rename(first_stop=stop_sequence, start_time=arrival_time)
+
+trip.end.time <- region.stop.times %>%
+  filter(weekday==1) %>%
+  select(trip_id,stop_sequence,arrival_time) %>%
+  rename(last_stop=stop_sequence, end_time=arrival_time)
+  
+trip.run.time <- left_join(trip.run.time, trip.start.time, by=c("trip_id","first_stop"))
+trip.run.time <- left_join(trip.run.time, trip.end.time, by=c("trip_id","last_stop"))
+trip.run.time <- trip.run.time %>% mutate(running_time=period_to_seconds(end_time - start_time)/3600) %>% drop_na() %>% select(trip_id,running_time)
+  
+route.runtimes <- region.trips %>%
+  filter(weekday==1) %>%
+  select(route_id,trip_id)
+
+route.runtimes <- left_join(route.runtimes, trip.run.time, by=c("trip_id")) %>%
+  drop_na() %>%
+  select(-trip_id) %>%
+  group_by(route_id) %>%
+  summarize(min_trip_time=min(running_time),max_trip_time=max(running_time), average_trip_time=mean(running_time))
+
+route.hours.of.service <- left_join(route.hours.of.service, route.runtimes, by=c("route_id"))
+
+##################################################################################################################################################
+##################################################################################################################################################
+# Calculate Route Summary
+##################################################################################################################################################
+##################################################################################################################################################
+
+individual.route.summary <- route.hours.of.service %>%
+  mutate(daily_veh_hrs = round(average_trip_time*daily_trips,1)) %>%
+  select(agency, route_short_name, route_type, total_span, daily_trips, avg_hourly_trips_per_span, poc_route, pov_route, equity_route, average_trip_time, daily_veh_hrs) %>%
+  mutate(avg_hourly_trips_per_span = round(avg_hourly_trips_per_span,1), average_trip_time = round(average_trip_time,2))
+
+individual.route.summary <- left_join(individual.route.summary, cost.per.service.hour, by=c("agency","route_type"))
+
+# Local that serve People of Color
+temp.poc <- individual.route.summary %>%
+  filter(route_type=="Local" & poc_route==1 & total_span>=12) %>%
+  select(agency, route_short_name, total_span, avg_hourly_trips_per_span, daily_trips, average_trip_time, daily_veh_hrs, cost_per_hour) %>%
+  mutate(cost_per_trip = round(cost_per_hour*average_trip_time,-1)) %>%
+  mutate(added_daily_trips = round((frequent.hourly.trip.threshold - avg_hourly_trips_per_span)*frequent.span.threshold,0)) %>%
+  mutate(added_daily_cost = added_daily_trips * cost_per_trip) %>%
+  filter(route_short_name!="KT_Ferry") %>%
+  filter(route_short_name!="TLINK") %>%
+  filter(route_short_name!="South Lake Union Streetcar") %>%
+  mutate(route_short_name = as.numeric(route_short_name)) %>%
+  filter(added_daily_trips>0) %>%
+  arrange(agency, desc(total_span), desc(avg_hourly_trips_per_span), route_short_name)
+
+num.ct <- temp.poc %>% filter(agency=="CT") %>% select(route_short_name) %>% pull() %>% length()
+num.et <- temp.poc %>% filter(agency=="ET") %>% select(route_short_name) %>% pull() %>% length()
+num.kcm <- temp.poc %>% filter(agency=="KCM") %>% select(route_short_name) %>% pull() %>% length()
+num.kt <- temp.poc %>% filter(agency=="KT") %>% select(route_short_name) %>% pull() %>% length()
+num.pt <- temp.poc %>% filter(agency=="PT") %>% select(route_short_name) %>% pull() %>% length()
+num.st <- temp.poc %>% filter(agency=="ST") %>% select(route_short_name) %>% pull() %>% length()
+
+temp <- temp.poc %>%
+  select(route_short_name, total_span, avg_hourly_trips_per_span, daily_trips, added_daily_trips, added_daily_cost) %>%
+  mutate(`added_daily_cost` = dollar(`added_daily_cost`)) %>%
+  setNames(c("Route", "Hours of Operation", "Hourly Trips", "Daily Trips", "Added Daily Trips", "Operational Cost of Added Daily Trips"))
+
+final.poc.routes.table <- kbl(temp, caption = paste0("Local Transit Routes by Agency serving People of Color: ", transit.service.period), booktabs = T, align = "lccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    kable_styling(latex_options = "hold_position") %>%
+    pack_rows(index=c("Community Transit"=num.ct,"Everett Transit"=num.et,"King County Metro"=num.kcm,
+                      "Kitsap Transit"=num.kt, "Pierce Transit"=num.pt, "Sound Transit"=num.st)) %>%
+    footnote(general = paste0("Source: ", transit.service.period," GTFS by Agency"), general_title = " ")
+
+# Local Routes that serve People of Lower Incomes
+temp.pov <- individual.route.summary %>%
+  filter(route_type=="Local" & pov_route==1 & total_span>=12) %>%
+  select(agency, route_short_name, total_span, avg_hourly_trips_per_span, daily_trips, average_trip_time, daily_veh_hrs, cost_per_hour) %>%
+  mutate(cost_per_trip = round(cost_per_hour*average_trip_time,-1)) %>%
+  mutate(added_daily_trips = round((frequent.hourly.trip.threshold - avg_hourly_trips_per_span)*frequent.span.threshold,0)) %>%
+  mutate(added_daily_cost = added_daily_trips * cost_per_trip) %>%
+  filter(route_short_name!="KT_Ferry") %>%
+  filter(route_short_name!="TLINK") %>%
+  filter(route_short_name!="South Lake Union Streetcar") %>%
+  mutate(route_short_name = as.numeric(route_short_name)) %>%
+  filter(added_daily_trips>0) %>%
+  arrange(agency, desc(total_span), desc(avg_hourly_trips_per_span), route_short_name)
+
+num.ct <- temp.pov %>% filter(agency=="CT") %>% select(route_short_name) %>% pull() %>% length()
+num.et <- temp.pov %>% filter(agency=="ET") %>% select(route_short_name) %>% pull() %>% length()
+num.kcm <- temp.pov %>% filter(agency=="KCM") %>% select(route_short_name) %>% pull() %>% length()
+num.kt <- temp.pov %>% filter(agency=="KT") %>% select(route_short_name) %>% pull() %>% length()
+num.pt <- temp.pov %>% filter(agency=="PT") %>% select(route_short_name) %>% pull() %>% length()
+num.st <- temp.pov %>% filter(agency=="ST") %>% select(route_short_name) %>% pull() %>% length()
+
+temp <- temp.pov %>%
+  select(route_short_name, total_span, avg_hourly_trips_per_span, daily_trips, added_daily_trips, added_daily_cost) %>%
+  mutate(`added_daily_cost` = dollar(`added_daily_cost`)) %>%
+  setNames(c("Route", "Hours of Operation", "Hourly Trips", "Daily Trips", "Added Daily Trips", "Operational Cost of Added Daily Trips"))
+
+final.pov.routes.table <- kbl(temp, caption = paste0("Local Transit Routes by Agency serving People of Lower Income: ", transit.service.period), booktabs = T, align = "lccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    kable_styling(latex_options = "hold_position") %>%
+    pack_rows(index=c("Community Transit"=num.ct,"Everett Transit"=num.et,"King County Metro"=num.kcm,
+                      "Kitsap Transit"=num.kt, "Pierce Transit"=num.pt, "Sound Transit"=num.st)) %>%
+    footnote(general = paste0("Source: ", transit.service.period," GTFS by Agency"), general_title = " ")
+
+# Local Routes that serve either People of Color or People of Lower Incomes
+temp.equ <- individual.route.summary %>%
+  filter(route_type=="Local" & equity_route==1 & total_span>=12) %>%
+  select(agency, route_short_name, total_span, avg_hourly_trips_per_span, daily_trips, average_trip_time, daily_veh_hrs, cost_per_hour) %>%
+  mutate(cost_per_trip = round(cost_per_hour*average_trip_time,-1)) %>%
+  mutate(added_daily_trips = round((frequent.hourly.trip.threshold - avg_hourly_trips_per_span)*frequent.span.threshold,0)) %>%
+  mutate(added_daily_cost = added_daily_trips * cost_per_trip) %>%
+  filter(route_short_name!="KT_Ferry") %>%
+  filter(route_short_name!="TLINK") %>%
+  filter(route_short_name!="South Lake Union Streetcar") %>%
+  mutate(route_short_name = as.numeric(route_short_name)) %>%
+  filter(added_daily_trips>0) %>%
+  arrange(agency, desc(total_span), desc(avg_hourly_trips_per_span), route_short_name)
+
+num.ct <- temp.equ %>% filter(agency=="CT") %>% select(route_short_name) %>% pull() %>% length()
+num.et <- temp.equ %>% filter(agency=="ET") %>% select(route_short_name) %>% pull() %>% length()
+num.kcm <- temp.equ %>% filter(agency=="KCM") %>% select(route_short_name) %>% pull() %>% length()
+num.kt <- temp.equ %>% filter(agency=="KT") %>% select(route_short_name) %>% pull() %>% length()
+num.pt <- temp.equ %>% filter(agency=="PT") %>% select(route_short_name) %>% pull() %>% length()
+num.st <- temp.equ %>% filter(agency=="ST") %>% select(route_short_name) %>% pull() %>% length()
+
+temp <- temp.equ %>%
+  select(route_short_name, total_span, avg_hourly_trips_per_span, daily_trips, added_daily_trips, added_daily_cost) %>%
+  mutate(`added_daily_cost` = dollar(`added_daily_cost`)) %>%
+  setNames(c("Route", "Hours of Operation", "Hourly Trips", "Daily Trips", "Added Daily Trips", "Operational Cost of Added Daily Trips"))
+
+final.equ.routes.table <- kbl(temp, caption = paste0("Local Transit Routes by Agency serving either People of Color or Lower Income: ", transit.service.period), booktabs = T, align = "lccccc") %>%
+    kable_styling(latex_options = "striped") %>%
+    kable_styling(latex_options = "scale_down") %>%
+    kable_styling(latex_options = "hold_position") %>%
+    pack_rows(index=c("Community Transit"=num.ct,"Everett Transit"=num.et,"King County Metro"=num.kcm,
+                      "Kitsap Transit"=num.kt, "Pierce Transit"=num.pt, "Sound Transit"=num.st)) %>%
+    footnote(general = paste0("Source: ", transit.service.period," GTFS by Agency"), general_title = " ")
+
+```
+
+
+```{r export-tables, include=FALSE}
+
+write_csv(equity.tracts.table, "output/equity_tracts_summary.csv")
+write_csv(individual.route.summary,"output/individual_route_summary.csv")
+write_csv(agency.trips.summary, "output/agency_trips_summary.csv")
+write_csv(routes.agency.summary, "output/routes_agency_summary.csv")
+
+```
+
+
+\newpage
+A summary table of the number of transit routes by agency and type of equity area is included in Table 2.
+``` {r echo=FALSE}
+final.equity.routes.table
+```
+
+\newpage
+``` {r echo=FALSE}
+final.span.trips.table
+```
+
+\newpage
+``` {r echo=FALSE}
+final.poc.routes.table
+```
+
+\newpage
+``` {r echo=FALSE}
+final.pov.routes.table
+```
+
+\newpage
+``` {r echo=FALSE}
+final.equ.routes.table
+```
